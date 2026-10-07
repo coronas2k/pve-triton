@@ -86,6 +86,8 @@ Notes for the PVE context:
 
 Pass: `pve-triton-dxvk_<version>.deb` builds; `dpkg -c` shows only the DXVK shared libraries under `/usr/lib/pve-triton/dxvk`; `dpkg -I` shows no runtime deps beyond libc/libstdc++.
 
+> **Verified 2026-10-07 (LXC, Debian 13.1):** plain build succeeds (`ninja`, 337 targets, ~4 min at `-j4`). Two recipe notes: (1) the repo's `include/vulkan` is a **pinned Vulkan-Headers submodule** — run `git submodule update --init --recursive` *before* the first meson setup, and if setup already failed, wipe the build dir and re-run so `-I include/vulkan/include` enters the compile lines (the fork pins Vulkan-Docs 1.4.340; Debian's system headers are too old). (2) The installed lib names are **`libdxvk_d3d11.so` / `libdxvk_dxgi.so`** (under `lib/x86_64-linux-gnu/`) — not `libd3d11.so`/`libdxgi.so`. The render server's `NPT_D3D11_LIBRARY_PATH`/`NPT_DXGI_LIBRARY_PATH` env vars must point at the `libdxvk_*` names. The `.pc` files ship as `dxvk-d3d11.pc`, `dxvk-dxgi.pc`, etc.
+
 ## Step 2 — Package virglrenderer with Neptune
 
 Goal: the host component that deserializes Neptune D3D11 calls and drives DXVK, shipped as `pve-triton-virglrenderer` (Depends: `pve-triton-dxvk`). Upstream recipe, unchanged for Linux:
@@ -107,7 +109,9 @@ Port-specific differences from the macOS build:
 - **Environment discovery is `LD_LIBRARY_PATH`, not `DYLD_FALLBACK_LIBRARY_PATH`**: the render server `dlopen`s the DXVK libraries by plain name, so `/usr/lib/pve-triton/dxvk/lib` must be on `LD_LIBRARY_PATH` at runtime (supplied by the package's env file, Step 4).
 - `-Dneptune=true` selects the Neptune backend over Venus inside the server; keep `-Dvenus=true` so the same server also serves guest Vulkan (the Triton KMD registers the Venus ICD too).
 
-Pass: `pve-triton-virglrenderer_<version>.deb` builds and installs; on the PVE host, `LD_LIBRARY_PATH=/usr/lib/pve-triton/dxvk/lib /usr/lib/pve-triton/virglrenderer/bin/virgl_render_server` starts with the DXVK libs resolving.
+Pass: `pve-triton-virglrenderer_<version>.deb` builds and installs; on the PVE host, with the DXVK libs resolving via `NPT_*_LIBRARY_PATH`, `/usr/lib/pve-triton/virglrenderer/libexec/virgl_render_server` starts.
+
+> **Verified 2026-10-07 (LXC, Debian 13.1):** one build fix needed — `src/vrend/vrend_renderer.c` fails under `-Werror=pedantic` (label followed by declaration, GCC 14 strictness). Worked around with `-Dc_args=-Wno-error=pedantic -Dcpp_args=-Wno-error=pedantic`; ship this as a `debian/patches/0001-...` entry rather than editing upstream code. Also: DXVK is a **build-time pkg-config dependency** (`Requires.private: ... dxvk-dxgi` in `virglrenderer.pc`) — the build environment needs `PKG_CONFIG_PATH` to include *both* the virglrenderer and dxvk staging prefixes. Install layout: `libexec/virgl_render_server`, `lib/x86_64-linux-gnu/libvirglrenderer.so.1`, `bin/virgl_test_server`.
 
 ## Step 3 — Package the QEMU fork
 
@@ -119,12 +123,15 @@ Goal: `utmapp/qemu` (`utm-edition` branch) built on Debian with virglrenderer fo
 # to 10.0, i.e. PVE 8.x (9.2) and PVE 9.x (10.x) guests)
 git clone -b dev/neptune-linux https://github.com/utmapp/qemu.git $SRC/qemu
 cd $SRC/qemu
-# debian/rules configure flags (upstream recipe + PVE staging):
+# debian/rules configure flags (verified recipe — see note below):
+#   PKG_CONFIG_PATH=<virglrenderer-staging>/pkgconfig:<dxvk-staging>/pkgconfig
 #   --prefix=/usr/lib/pve-triton/qemu
 #   --disable-werror --disable-docs --enable-plugins
-#   PKG_CONFIG_PATH=/usr/lib/pve-triton/virglrenderer/lib/pkgconfig
+#   --target-list=x86_64-softmmu   (trimmed for the PVE use case)
 dpkg-buildpackage -us -uc
 ```
+
+> **Verified 2026-10-07 (LXC, Debian 13.1):** configure passes with `KVM support: YES` and `VirGL support: YES 1.3.0`. Three gotchas: (1) `PKG_CONFIG_PATH` must chain **both** staging prefixes — virglrenderer's `.pc` carries `Requires.private: ... dxvk-dxgi`, so pkg-config needs the dxvk `.pc` files too, otherwise configure silently reports `VirGL support: NO`; (2) install **`libepoxy-dev` + `libgbm-dev` before configure** — without them, `OpenGL support (epoxy): NO` and `egl-headless` is not compiled in (configure summary text is the way to verify; QEMU 10 has no `config-host.mak` VIRGL lines); (3) full build is 2839 targets, ~10 min at `-j4` on 6 vCPU / 4 GiB RAM, no OOM.
 
 PVE-compatibility checks (the real porting work in this step; do them against the installed package binary before the .deb is declared done):
 1. Configure summary must report `virglrenderer: YES`.
@@ -165,6 +172,8 @@ Goal: attach the Neptune-capable virtio-gpu device to a Windows VM.
 3. Boot and confirm in the guest: a `1AF4:1050` PCI device appears (Device Manager / `pnputil /enum-devices`).
 
 Pass: device enumerated in the guest; VM still boots to desktop on the fallback display path (or headless, pending Step 7).
+
+> **Verified 2026-10-07 (LXC, no KVM):** with `-display egl-headless -S -device virtio-gpu-gl-pci,hostmem=256M,blob=true,venus=true,neptune=true`, the device **realizes successfully** through the built virglrenderer (TCG accel; the smoke test ran until killed). One new host requirement surfaced: QEMU logs `warning: open /dev/udmabuf: No such file or directory` — the fork uses the kernel's `udmabuf` helper (`CONFIG_UDMABUF`). It is non-fatal at device-realize time, but **add to the PVE host checklist: `modprobe udmabuf`** (and make it persistent via `/etc/modules-load.d/`); if QEMU runs inside an LXC, the node must also be passed into the container. Runtime impact (fatal vs fallback path) is still unverified — resolve on the PVE node.
 
 ## Step 6 — Windows guest driver install
 
