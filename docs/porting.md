@@ -175,6 +175,8 @@ Pass: `apt remove pve-triton-*` cleanly reverts the host to stock PVE; the wrapp
 >
 > Packages held against unattended upgrades (`apt-mark hold pve-triton-*`).
 
+> **Vulkan host driver (same date):** the render server's DXVK libraries need the host ANV ICD — `mesa-vulkan-drivers` is now an explicit `Depends` of `pve-triton-virglrenderer`. Verified on the test node with `vulkaninfo --summary`: `Intel(R) UHD Graphics 630 (CFL GT2)`, `PHYSICAL_DEVICE_TYPE_INTEGRATED_GPU`, Vulkan 1.4.305 (`vulkan-tools` is useful for this check but not a runtime dep).
+
 ## Step 5 — VM configuration
 
 Goal: attach the Neptune-capable virtio-gpu device to a Windows VM.
