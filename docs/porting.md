@@ -157,6 +157,17 @@ Pass: `apt remove pve-triton-*` cleanly reverts the host to stock PVE; the wrapp
 
 > **DKMS note:** no step in this map produces a kernel module, so there is no DKMS package — see the applicability note in section 0. Add a `pve-triton-dkms` binary package only if the fork ever grows an out-of-tree module.
 
+> **Verified 2026-10-07 (Debian 13 LXC build host):** all four packages build and install via `packaging/build-all.sh`:
+>
+> | package | version | size | notes |
+> |---|---|---|---|
+> | `pve-triton-dxvk` | 2.7.1 | 95M | 337 meson targets, `native_headless` |
+> | `pve-triton-virglrenderer` | 1.3.0 | 862K | `neptune=true venus=true`, needs `-Wno-error=pedantic` on GCC 14 |
+> | `pve-triton-qemu` | 10.0.12 | 49M | `x86_64-softmmu` only, linked against both staged pkgconfig dirs |
+> | `pve-triton-stack` | 0.1 | 2.1K | meta; wrapper + `/etc/pve-triton/env` conffile |
+>
+> End-to-end check through the installed wrapper (`/usr/bin/pve-triton-qemu`) realizes the Neptune device (TCG smoke test, same as the Step 5 note below). Two packaging gotchas for rebuilds: build with `DEB_BUILD_OPTIONS=noautodbgsym nostrip`, and make the QEMU `debian/rules` `dh_auto_clean` a no-op (the source-root `Makefile` is a configure bootstrap; `make distclean` fails). On the PVE host, replace step 1's repo tooling with `apt install ./pve-triton-*.deb` if a LAN repo is overkill.
+
 ## Step 5 — VM configuration
 
 Goal: attach the Neptune-capable virtio-gpu device to a Windows VM.

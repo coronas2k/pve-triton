@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# pve-triton-qemu: utmapp/qemu dev/neptune-linux (QEMU 10.0.12) for
+# x86_64-softmmu with VirGL + epoxy (egl-headless support).
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+export PKG_CONFIG_PATH = /usr/lib/pve-triton/virglrenderer/lib/x86_64-linux-gnu/pkgconfig:/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig
+
+BUILDDIR = build
+CONF_FLAGS = \
+	--prefix=/usr/lib/pve-triton/qemu \
+	--disable-werror \
+	--disable-docs \
+	--enable-plugins \
+	--target-list=x86_64-softmmu
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	# Idempotent: reuse an existing configured build tree across retries.
+	test -f $(BUILDDIR)/build.ninja || (mkdir -p $(BUILDDIR) && cd $(BUILDDIR) && ../configure $(CONF_FLAGS))
+
+override_dh_auto_build:
+	ninja -C $(BUILDDIR) -j$(shell nproc)
+
+override_dh_auto_install:
+	DESTDIR=$(CURDIR)/debian/pve-triton-qemu meson install -C $(BUILDDIR)
+
+override_dh_auto_test:
+	# Full qtest suite is impractical in packaging; validated by the
+	# PVE qm showcmd dry-run and guest bring-up.
+export DEB_BUILD_OPTIONS = noautodbgsym nostrip
+
+override_dh_auto_clean:
+	# QEMU's source-root Makefile is a configure bootstrap; `make distclean`
+	# is not usable. Keep the configured build tree across iterations.
+
+override_dh_shlibdeps:
+	# Links libvirglrenderer.so.1 from pve-triton-virglrenderer (private
+	# layout, no shlibs file); Depends declared manually in debian/control.
+	dh_shlibdeps -l/usr/lib/pve-triton/virglrenderer/lib/x86_64-linux-gnu --dpkg-shlibdeps-params=--ignore-missing-info

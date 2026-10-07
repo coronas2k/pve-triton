@@ -1,0 +1,2 @@
+usr/bin/pve-triton-qemu usr/bin/
+etc/pve-triton/env etc/pve-triton/

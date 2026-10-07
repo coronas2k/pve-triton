@@ -1,0 +1,15 @@
+# Environment for the Triton/Neptune host stack (sourced by
+# /usr/bin/pve-triton-qemu).
+# Managed by the pve-triton-stack package; local edits persist (conffile).
+
+# Shared libraries: virglrenderer (QEMU links it) + dxvk (dlopen'd by
+# the Neptune render server).
+LD_LIBRARY_PATH="/usr/lib/pve-triton/virglrenderer/lib/x86_64-linux-gnu:/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
+
+# Host D3D backends dlopen'd by virgl_render_server. Defaults are
+# libd3d11.so/libdxgi.so, but the dxvk build installs versioned
+# libdxvk_* names, so point the NPT_* vars at them explicitly.
+NPT_D3D11_LIBRARY_PATH="/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libdxvk_d3d11.so"
+NPT_DXGI_LIBRARY_PATH="/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libdxvk_dxgi.so"
+# D3D12 (optional, needs libvkd3d-proton-d3d12.so from a vkd3d-proton build):
+#NPT_D3D12_LIBRARY_PATH="/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libvkd3d-proton-d3d12.so"

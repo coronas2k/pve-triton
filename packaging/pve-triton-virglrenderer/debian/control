@@ -1,0 +1,30 @@
+Source: pve-triton-virglrenderer
+Section: utils
+Priority: optional
+Maintainer: Nayef <nayef@local>
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Build-Depends:
+  debhelper-compat (= 13),
+  meson,
+  ninja-build,
+  pkg-config,
+  libdrm-dev,
+  libepoxy-dev,
+  libgbm-dev,
+  libx11-dev,
+  libwayland-dev,
+  wayland-protocols,
+  python3-yaml,
+  pve-triton-dxvk
+
+Package: pve-triton-virglrenderer
+Architecture: amd64
+Depends: ${misc:Depends}, ${shlibs:Depends}, pve-triton-dxvk
+Description: virglrenderer with Neptune D3D11 render server (Triton stack)
+ Fork of utmapp/virglrenderer (dev/neptune-linux branch) built with
+ -Dneptune=true -Dvenus=true. Provides the virgl_render_server which
+ deserializes Neptune D3D11 API calls from QEMU virtio-gpu and executes
+ them on the host via the pve-triton-dxvk libraries. Installed under
+ /usr/lib/pve-triton/virglrenderer.
+ Upstream: https://github.com/utmapp/virglrenderer

@@ -1,0 +1,25 @@
+Source: pve-triton-dxvk
+Section: utils
+Priority: optional
+Maintainer: Nayef <nayef@local>
+Standards-Version: 4.6.2
+Rules-Requires-Root: no
+Build-Depends:
+  debhelper-compat (= 13),
+  meson,
+  ninja-build,
+  pkg-config,
+  glslang-tools,
+  spirv-tools,
+  libvulkan-dev
+
+Package: pve-triton-dxvk
+Architecture: amd64
+Depends: ${misc:Depends}, ${shlibs:Depends}
+Description: Triton host renderer libraries (DXVK native, headless dmabuf WSI)
+ Forked DXVK built as native Linux shared libraries (libdxvk_d3d11.so,
+ libdxvk_dxgi.so, ...) for the UTM/Neptune Triton D3D11 virtualization
+ stack. The headless WSI exports rendered frames as dmabufs for
+ scanout through virtio-gpu. Installed under /usr/lib/pve-triton/dxvk
+ (private to pve-triton-virglrenderer / pve-triton-qemu).
+ Upstream: https://github.com/osy/dxvk

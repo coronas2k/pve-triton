@@ -1,0 +1,42 @@
+#!/usr/bin/make -f
+# pve-triton-dxvk: build osy/dxvk as native shared libraries with the
+# headless dmabuf WSI (Neptune render server host backend).
+
+export DEB_BUILD_MAINT_OPTIONS = hardening=+all
+
+BUILDDIR = builddir
+MESON_FLAGS = \
+	-Dprefix=/usr/lib/pve-triton/dxvk \
+	-Dnative_headless=true \
+	-Dnative_sdl2=disabled \
+	-Dnative_sdl3=disabled \
+	-Dnative_glfw=disabled \
+	-Dbuildtype=release \
+	-Db_ndebug=true
+
+%:
+	dh $@
+
+override_dh_auto_configure:
+	# The include/vulkan + include/spirv submodules must be checked out
+	# before first meson setup (pinned Vulkan-Headers; system headers are
+	# too old for this fork). The debian/rules assumes the source tree is
+	# a git checkout with submodules populated.
+	# Idempotent: reuse an existing configured build tree across retries.
+	test -f $(BUILDDIR)/build.ninja || meson setup $(BUILDDIR) $(MESON_FLAGS)
+
+override_dh_auto_build:
+	ninja -C $(BUILDDIR) -j$(shell nproc)
+
+override_dh_auto_install:
+	DESTDIR=$(CURDIR)/debian/pve-triton-dxvk meson install -C $(BUILDDIR)
+
+override_dh_auto_test:
+	# No test suite for the native headless build; smoke-tested
+	# end-to-end by the render server.
+export DEB_BUILD_OPTIONS = noautodbgsym nostrip
+
+override_dh_shlibdeps:
+	# Private intra-package libs (libdxvk_* interdepend); inter-package
+	# Depends are declared manually in debian/control.
+	dh_shlibdeps -l$(CURDIR)/debian/pve-triton-dxvk/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu --dpkg-shlibdeps-params=--ignore-missing-info

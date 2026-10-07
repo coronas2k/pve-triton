@@ -1,0 +1,6 @@
+pve-triton-qemu (10.0.12) UNRELEASED; urgency=medium
+
+  * utmapp/qemu dev/neptune-linux (1d8d9d9), x86_64-softmmu only
+  * virtio-gpu-gl-pci with blob/hostmem/venus/neptune properties
+
+ -- Nayef <nayef@local>  Wed, 07 Oct 2026 15:00:00 +0300
