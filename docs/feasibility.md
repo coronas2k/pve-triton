@@ -55,7 +55,7 @@ Key architectural facts (from the Triton and Neptune posts):
 | QEMU | `utmapp/qemu`, `utm-edition` branch | Configure picks up virglrenderer via pkg-config; must report `virglrenderer: YES`. UTM-only device `virtio-ramfb-gl` does not exist in vanilla QEMU. |
 | virglrenderer | `utmapp/virglrenderer` | Built with `-Dneptune=true`; produces `virgl_render_server` (render-isolated worker processes per guest context). The Linux-relevant branch must be identified (see [next-steps.md](next-steps.md) — `macos-next` is the macOS branch). |
 | DXVK | osy's fork | Native (non-Wine) build with dmabuf WSI. Loaded by the Neptune render server; needs a Vulkan 1.3 driver on the host. |
-| Vulkan driver | Mesa ANV (stock) | PVE 8 = Debian 12 (Mesa 22.3, ANV exposes Vulkan 1.3 on Skylake+); PVE 9 = Debian 13 (Mesa 25.x). Gen9 (Skylake) or newer iGPU assumed. |
+| Vulkan driver | Mesa ANV (stock) | PVE 8 = Debian 12 (Mesa 22.3, ANV exposes Vulkan 1.3 on Skylake+); PVE 9 = Debian 13 (Mesa 25.x). Gen9 (Skylake) or newer iGPU assumed. **Optional, vendor-agnostic:** the requirement is only "a Vulkan 1.3 ICD with dmabuf external memory" — `mesa-vulkan-drivers` ships as a `Recommends` of `pve-triton-virglrenderer`; an NVIDIA host can substitute the proprietary driver's ICD, keeping an NVIDIA-compatibility pathway open. |
 | Kernel / i915 | stock PVE kernel | Only needs to support the iGPU with dmabuf export/import; no DKMS modules required (unlike SR-IOV approaches). |
 
 Proven Linux-host precedent from the Neptune post: QEMU run on Ubuntu 24.04 with `-accel kvm -cpu host -smp 4 -m 16G`. Proxmox generates an equivalent (KVM-accelerated) argument set, so the hypervisor configuration itself is not exotic.

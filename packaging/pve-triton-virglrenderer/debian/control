@@ -20,12 +20,13 @@ Build-Depends:
 
 Package: pve-triton-virglrenderer
 Architecture: amd64
-# mesa-vulkan-drivers provides the ANV ICD the render server's DXVK
-# libraries target (D3D11 -> Vulkan on the host GPU); libvulkan1 comes
-# with it. DXVK is dlopen()ed via NPT_D3D11_LIBRARY_PATH, invisible to
-# dh_shlibdeps.
-Depends: ${misc:Depends}, ${shlibs:Depends}, pve-triton-dxvk,
- mesa-vulkan-drivers
+# Optional but required for Intel/AMD hosts: mesa-vulkan-drivers provides
+# the ANV/RADV ICD the render server's DXVK libraries target (D3D11 ->
+# Vulkan). Kept a Recommends, not a Depends, so an NVIDIA host can satisfy
+# the Vulkan requirement with the proprietary driver's ICD instead.
+# DXVK is dlopen()ed via NPT_D3D11_LIBRARY_PATH, invisible to dh_shlibdeps.
+Depends: ${misc:Depends}, ${shlibs:Depends}, pve-triton-dxvk
+Recommends: mesa-vulkan-drivers
 Description: virglrenderer with Neptune D3D11 render server (Triton stack)
  Fork of utmapp/virglrenderer (dev/neptune-linux branch) built with
  -Dneptune=true -Dvenus=true. Provides the virgl_render_server which
