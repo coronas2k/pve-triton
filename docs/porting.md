@@ -168,6 +168,13 @@ Pass: `apt remove pve-triton-*` cleanly reverts the host to stock PVE; the wrapp
 >
 > End-to-end check through the installed wrapper (`/usr/bin/pve-triton-qemu`) realizes the Neptune device (TCG smoke test, same as the Step 5 note below). Two packaging gotchas for rebuilds: build with `DEB_BUILD_OPTIONS=noautodbgsym nostrip`, and make the QEMU `debian/rules` `dh_auto_clean` a no-op (the source-root `Makefile` is a configure bootstrap; `make distclean` fails). On the PVE host, replace step 1's repo tooling with `apt install ./pve-triton-*.deb` if a LAN repo is overkill.
 
+> **Verified 2026-10-07 (PVE 9.2.2 test node, i5-8500T, iGPU PCI-passthrough at 01:00.0):** all four packages installed via `apt install ./pve-triton-*.deb` (all four paths must be passed on one command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends). Post-install checks: stock `pve-qemu-kvm` 11.0.0 binary checksum unchanged, `qm` functional, and the fork realizes the Neptune device through the wrapper with `-accel kvm`. Two host findings:
+>
+> 1. `/dev/udmabuf` already exists — `CONFIG_UDMABUF` is built into the PVE 9.x kernel (`7.0.2-6-pve`), so the Step 5 `modprobe udmabuf` checklist item is a no-op there.
+> 2. **The fork dlopens `libEGL.so.1`/`libGL.so.1` at runtime (via epoxy), which `dh_shlibdeps` cannot see** — `pve-triton-qemu` now carries explicit `Depends: libegl1, libepoxy0, libgbm1, libgl1, libopengl0`. If installing an older build by hand: `apt install libegl1 libepoxy0 libgbm1 libgl1 libopengl0` first (the fresh test node also needed `apt update` — Debian/PVE sources present but unpopulated).
+>
+> Packages held against unattended upgrades (`apt-mark hold pve-triton-*`).
+
 ## Step 5 — VM configuration
 
 Goal: attach the Neptune-capable virtio-gpu device to a Windows VM.
