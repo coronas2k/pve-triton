@@ -195,6 +195,20 @@ Pass: device enumerated in the guest; VM still boots to desktop on the fallback 
 
 > **Machine-type gotcha (test node, 2026-10-07):** `qm showcmd 101` on PVE 9.2 resolves even a plain `machine: q35` pin to `-machine 'type=pc-q35-11.0+pve0'` — the stock QEMU 11.0 version plus PVE's machine-type patch. The utmapp fork (base 10.0.12, no PVE patches) accepts neither, so **`qm start` against the fork will fail at machine type** (risk R2 made concrete). Resolution options, in order of preference: pin the VM to `machine: pc-q35-10.0` and pass `args:` so the fork only needs the version-alias (verify the fork maps `pc-q35-10.0` — stock QEMU aliases minor versions), or launch the VM via the fork with a hand-built machine line (loses `qm` lifecycle integration; acceptable for a dedicated test VM). Saved contract: `/root/vm101-showcmd.txt` on the test node.
 
+> **Resolved on the test node — the `/usr/bin/kvm` dispatcher shim (2026-10-07):** `qm start` under the fork works with full PVE lifecycle integration (QMP, pidfile, noVNC) via a `dpkg-divert` shim: the stock binary is preserved as `/usr/bin/kvm.distrib`, and `/usr/bin/kvm` (see `packaging/pve-triton-stack/kvm-dispatcher.sh`) routes only VMIDs listed in `PVE_TRITON_VMS` to the fork, rewriting the PVE-only bits the fork can't accept:
+>
+> | PVE emission | fork gap | shim rewrite |
+> |---|---|---|
+> | `type=pc-q35-<ver>+pve0` | no PVE machine patches | `pc-q35-10.0` |
+> | `-id <vmid>` | pve-qemu-kvm-only option | stripped |
+> | `-iscsi initiator-name=…` | no libiscsi in build | stripped |
+> | `-cpu host,-cet-ibt,-cet-ss,…` | no CET props in QEMU 10 host model | `-cet-*` removed |
+> | `-vnc …,password=on` | no DES cipher backend | `password=on` removed |
+> | `"aio":"io_uring"` | no liburing in build | `"aio":"threads"` |
+> | *(no `-accel` arg)* | pve-qemu-kvm defaults to KVM when named `kvm`; fork defaults to TCG | append `-accel kvm` |
+>
+> The last three go away once the fork is rebuilt with `liburing-dev`, `libiscsi-dev`, `libgcrypt20-dev` (Build-Depends updated). Note PVE pins a Windows guest's machine version to at least its `creation-qemu` meta value — the test VM's meta was lowered to `creation-qemu=10.0.0` so a `pc-q35-10.0` pin sticks. GL requirement: the Neptune device only realizes on a GL display backend — keep `vga: std` and add `-display egl-headless,gl=on` via `args:` (PVE's noVNC stays on the VGA console; egl-headless serves the virtio-gpu console).
+
 > **Verified 2026-10-07 (LXC, no KVM):** with `-display egl-headless -S -device virtio-gpu-gl-pci,hostmem=256M,blob=true,venus=true,neptune=true`, the device **realizes successfully** through the built virglrenderer (TCG accel; the smoke test ran until killed). One new host requirement surfaced: QEMU logs `warning: open /dev/udmabuf: No such file or directory` — the fork uses the kernel's `udmabuf` helper (`CONFIG_UDMABUF`). It is non-fatal at device-realize time, but **add to the PVE host checklist: `modprobe udmabuf`** (and make it persistent via `/etc/modules-load.d/`); if QEMU runs inside an LXC, the node must also be passed into the container. Runtime impact (fatal vs fallback path) is still unverified — resolve on the PVE node.
 
 ## Step 6 — Windows guest driver install
