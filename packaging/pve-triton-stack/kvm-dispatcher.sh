@@ -26,6 +26,13 @@
 #   - pve-qemu-kvm defaults to KVM accel when invoked as "kvm"; the fork
 #     is vanilla (TCG default) -> append "-accel kvm" if PVE passed none
 #     (PVE only passes -accel tcg when the VM's kvm: option is off).
+#   - PVE sizes the efidisk0 pflash front-end with an explicit "size" hint
+#     (128K) in its blockdev JSON; stock QEMU 11 tolerates the truncation
+#     but the fork (10.0.12) honors it strictly -> OVMF finds a var store
+#     smaller than its baked-in PcdOvmfFlashNvStorageVariableSize, fails
+#     to init it, and runs RAM-only (every NVRAM write — bcfg entries,
+#     boot order, Windows' own "Windows Boot Manager" option — is lost at
+#     reset). Drop the size hint so the fork maps the whole efidisk LV.
 #
 # To move a VM to the fork: add its VMID to PVE_TRITON_VMS below (or in
 # /etc/pve-triton/env). To revert the shim entirely:
@@ -61,7 +68,11 @@ case ",$PVE_TRITON_VMS," in
 			skip=1
 			continue
 		fi
-		args+=("$(printf '%s' "$a" | sed -e 's/pc-q35-[0-9.]*+pve[0-9]*/pc-q35-10.0/g' -e 's/,-cet-ibt//g' -e 's/,-cet-ss//g' -e 's/,password=on//g' -e 's/"aio":"io_uring"/"aio":"threads"/g')")
+		a="$(printf '%s' "$a" | sed -e 's/pc-q35-[0-9.]*+pve[0-9]*/pc-q35-10.0/g' -e 's/,-cet-ibt//g' -e 's/,-cet-ss//g' -e 's/,password=on//g' -e 's/"aio":"io_uring"/"aio":"threads"/g')"
+		case "$a" in
+		*drive-efidisk0*) a="$(printf '%s' "$a" | sed 's/"size":[0-9]*,//')" ;;
+		esac
+		args+=("$a")
 	done
 accel=0
 for a in "${args[@]}"; do
