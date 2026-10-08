@@ -70,7 +70,7 @@ case ",$PVE_TRITON_VMS," in
 		fi
 		a="$(printf '%s' "$a" | sed -e 's/pc-q35-[0-9.]*+pve[0-9]*/pc-q35-10.0/g' -e 's/,-cet-ibt//g' -e 's/,-cet-ss//g' -e 's/,password=on//g' -e 's/"aio":"io_uring"/"aio":"threads"/g')"
 		case "$a" in
-		*drive-efidisk0*) a="$(printf '%s' "$a" | sed 's/"size":[0-9]*,//')" ;;
+		*drive-efidisk0*) a="$(printf '%s' "$a" | sed 's/"size":[0-9]*//')" ;;
 		esac
 		args+=("$a")
 	done
