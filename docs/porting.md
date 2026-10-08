@@ -12,7 +12,7 @@ Less code than it sounds. Neptune was **brought up on a Linux host first** (Ubun
 | Guest KMD (`viogpu3d.sys`, `osy/kvm-guest-drivers-windows`) | **None** | none (Windows guest driver) | Same — signed pre-release package. |
 | DXVK fork | **Rebuild** | `pve-triton-dxvk` | Native Linux build with dmabuf WSI; recipe published. No code changes expected. |
 | virglrenderer (`utmapp/virglrenderer`) | **Rebuild + branch pick** | `pve-triton-virglrenderer` (Depends: dxvk) | `-Dneptune=true -Dvenus=true` Linux build; must confirm the correct branch for the Linux/DXVK backend (Q1 in [next-steps.md](next-steps.md)). |
-| QEMU (`utmapp/qemu`, `utm-edition`) | **Rebuild + PVE compat** | `pve-triton-qemu` | Linux build is trivial; the work is base-version/machine-type compatibility with PVE's generated command line (Q2/Q3). |
+| QEMU (`proxmox/pve-qemu` + Triton quilt series) | **Rebase** | `pve-triton-qemu` (Conflicts/Replaces: pve-qemu-kvm) | Series rebased onto stock `v11.1.1` (13 of 16 commits kept; see Step 3 rebase ledger); PVE arg compatibility is native by construction. |
 | macOS-only components | **Skip** | — | WebKit/ANGLE/libepoxy, d3dmetal-native, dxmt-native, universal `lipo` render server, HVF `ipa-granule-size` — none apply to a Linux host. |
 | Integration glue | **New** | `pve-triton-stack` (meta) + wrapper/conffiles | Packaging rules, VM config, environment plumbing (LD_LIBRARY_PATH via package-provided env file), console/display validation. This is the genuinely new work. |
 
@@ -27,7 +27,7 @@ Less code than it sounds. Neptune was **brought up on a Linux host first** (Ubun
 - **Tooling:** `debhelper` + `meson` build-deps (i.e. `dh` with the meson buildsystem); each component is one source package with a matching binary package name from the table above.
 - **Filesystem layout (FHS-clean, dpkg-owned):** binaries in `/usr/lib/pve-triton/{qemu,virglrenderer,dxvk}/`, shared env file in `/etc/pve-triton/env` (exporting `LD_LIBRARY_PATH=/usr/lib/pve-triton/{virglrenderer,dxvk}/lib`), wrapper at `/usr/bin/pve-triton-qemu` (sourcing the env file, then `exec`ing the real binary). No `/opt`, no loose files outside dpkg's database.
 - **Versioning:** `<upstream-version>+pve<triton-serial>` (e.g. `9.2.0+pve1`), tracking the base QEMU version so compatibility with PVE's machine types is legible from `dpkg -l`.
-- **Coexistence:** `pve-triton-qemu` must **not** `Breaks:`/`Replaces:` `pve-qemu-kvm` — the packages coexist; the wrapper dispatches. If a VM is later switched fully to the fork, do it via the wrapper, not by conflicting with the packaged QEMU (so PVE updates keep working).
+- **Coexistence:** **(pivoted 2026-10-08)** `pve-triton-qemu` **replaces** `pve-qemu-kvm` in place (`Conflicts/Replaces:`), because the base *is* PVE's QEMU — the old separate-prefix + wrapper + dispatcher-scheme coexistence created an argument-translation layer whose cost grew to eight rewrites (see the retired shim note in Step 5). The wrapper package still exists for the render-server env plumbing (`/etc/pve-triton/env`), but no longer wraps the QEMU binary.
 - **Distribution:** build in a Debian container matching the PVE release, publish to a local APT repo (e.g. `reprepro`/`aptly` served on the PVE host or LAN), then `apt install` + `apt-mark hold pve-triton-*` to survive unattended upgrades. This replaces any manual binary-copy or wrapper-shadowing step.
 - **Conffiles:** the wrapper, env file, and example VM config snippet ship as conffiles so local edits survive upgrades.
 
@@ -113,47 +113,60 @@ Pass: `pve-triton-virglrenderer_<version>.deb` builds and installs; on the PVE h
 
 > **Verified 2026-10-07 (LXC, Debian 13.1):** one build fix needed — `src/vrend/vrend_renderer.c` fails under `-Werror=pedantic` (label followed by declaration, GCC 14 strictness). Worked around with `-Dc_args=-Wno-error=pedantic -Dcpp_args=-Wno-error=pedantic`; ship this as a `debian/patches/0001-...` entry rather than editing upstream code. Also: DXVK is a **build-time pkg-config dependency** (`Requires.private: ... dxvk-dxgi` in `virglrenderer.pc`) — the build environment needs `PKG_CONFIG_PATH` to include *both* the virglrenderer and dxvk staging prefixes. Install layout: `libexec/virgl_render_server`, `lib/x86_64-linux-gnu/libvirglrenderer.so.1`, `bin/virgl_test_server`.
 
-## Step 3 — Package the QEMU fork
+## Step 3 — Rebuild pve-qemu-kvm with the Triton series (the pivot)
 
-Goal: `utmapp/qemu` (`utm-edition` branch) built on Debian with virglrenderer found via pkg-config, accepting PVE's argument set, shipped as `pve-triton-qemu`.
+> **PIVOT (2026-10-08):** the original plan built `utmapp/qemu` (`utm-edition`) and bridged it to PVE with a command-line dispatcher shim. That bridge turned out to be the dominant cost: eight separate rewrites (machine-type pin, `-id`, `-iscsi`, `-cet-*`, `io_uring`, VNC `password=on`, `-accel` append, and — fatally — an efidisk size-hint strip that truncated OVMF var stores and silently discarded every boot option at reset; see the retired shim note in Step 5). The pivot: build **PVE's own QEMU** with the Triton patch series on top, so PVE's command line is the native dialect and the shim disappears entirely.
+
+Goal: `proxmox/pve-qemu` (master = `pve-qemu-kvm 11.1.1-2`) with its `qemu` submodule pinned at stock `v11.1.1`, carrying the Triton series as **quilt patches in `debian/patches/triton/`** — the submodule tree itself stays pristine, exactly like PVE's own `pve/` patch set. Shipped as `pve-triton-qemu`, which **replaces** the stock `pve-qemu-kvm` package rather than coexisting with it (Step 4).
 
 ```bash
-# branch dev/neptune-linux (recon Q2/Q3: RESOLVED — base QEMU 10.0.12, neptune
-# device property in hw/display/virtio-gpu-gl.c; machine types cover pc-q35 up
-# to 10.0, i.e. PVE 8.x (9.2) and PVE 9.x (10.x) guests)
-git clone -b dev/neptune-linux https://github.com/utmapp/qemu.git $SRC/qemu
-cd $SRC/qemu
-# debian/rules configure flags (verified recipe — see note below):
-#   PKG_CONFIG_PATH=<virglrenderer-staging>/pkgconfig:<dxvk-staging>/pkgconfig
-#   --prefix=/usr/lib/pve-triton/qemu
-#   --disable-werror --disable-docs --enable-plugins
-#   --target-list=x86_64-softmmu   (trimmed for the PVE use case)
-dpkg-buildpackage -us -uc
+git clone https://github.com/proxmox/pve-qemu.git $SRC/pve-qemu
+cd $SRC/pve-qemu
+git submodule update --init --recursive        # ../mirror_qemu @ v11.1.1 (c3d48b7d1e) + roms
+
+cd qemu
+git checkout -b triton-picks c3d48b7d1e        # stock v11.1.1
+git am -3 /tmp/triton-series/*.patch           # 16 format-patches from utmapp/qemu dev/neptune-linux
+cd ..
+# debian/changelog: new top entry 11.1.1-2+triton1
+# export the picks and append to the quilt series:
+git -C qemu format-patch c3d48b7d1e..HEAD -o "$PWD/debian/patches/triton/"
+ls debian/patches/triton/ | sed 's|^|triton/|' >> debian/patches/series
+apt-get build-dep -y .                         # needs deb-src of the PVE repo in sources
+make -j4                                       # Makefile copies qemu/ into the build dir, applies the quilt series, dpkg-buildpackage
 ```
 
-> **Verified 2026-10-07 (LXC, Debian 13.1):** configure passes with `KVM support: YES` and `VirGL support: YES 1.3.0`. Three gotchas: (1) `PKG_CONFIG_PATH` must chain **both** staging prefixes — virglrenderer's `.pc` carries `Requires.private: ... dxvk-dxgi`, so pkg-config needs the dxvk `.pc` files too, otherwise configure silently reports `VirGL support: NO`; (2) install **`libepoxy-dev` + `libgbm-dev` before configure** — without them, `OpenGL support (epoxy): NO` and `egl-headless` is not compiled in (configure summary text is the way to verify; QEMU 10 has no `config-host.mak` VIRGL lines); (3) full build is 2839 targets, ~10 min at `-j4` on 6 vCPU / 4 GiB RAM, no OOM.
+> **Rebase ledger (2026-10-08, LXC):** of the 16-commit UTM series, **13 were rebased onto v11.1.1**, 2 were **absorbed by upstream 11.1.1 already** (the hostmem-region state machine and async fencing), and 1 was **dropped as macOS-only** (Spice IOSurface/Metal scanout; same bucket as the Metal/ANGLE UI commits that were never in the series). Two upstream changes shaped the merge: console APIs were renamed (`dpy_gl_scanout_dmabuf` → `qemu_console_gl_scanout_dmabuf`), and the unmap path moved from boolean flags to a `mapping_state` machine — the "don't stall the control queue behind a blob unmap" commit was re-grafted onto that machine (deferred `UNREF` completion via `cmd->deferred`, BH-drained `unmap_done_list`, immediate `UNMAP_BLOB` response). One commit from the fork's fix-stream (`retire fences immediately when the renderer context is dead`) is the fix for the exact guest-GPU-scheduler wedge (VIDEO_TDR_FAILURE-class freezes) that motivated this port.
 
-PVE-compatibility checks (the real porting work in this step; do them against the installed package binary before the .deb is declared done):
-1. Configure summary must report `virglrenderer: YES`.
+Gotchas for rebuilds (all hit on the LXC):
+- **`git -C qemu format-patch -o debian/patches/triton/` writes relative to the submodule** (`-C` chdirs first) — the first run silently created `qemu/debian/patches/triton/`, which then broke the Makefile's `cp -a debian` into the build dir (nested `debian/debian`, `dpkg-buildpackage: cannot open debian/changelog`). Use `-o "$PWD/debian/patches/triton/"` and keep the submodule tree `git status`-clean.
+- The Makefile runs `meson subprojects download` only when the submodule looks uninitialized; PVE's `debian/rules` configures with `--disable-download`, so run `meson subprojects download` **inside the build dir** (`pve-qemu-kvm-11.1.1/`) before `dpkg-buildpackage` if the build fails with *"subprojects were not checked out"*.
+- Run `dpkg-buildpackage` **from inside the source build dir** (`pve-qemu-kvm-11.1.1/`), not the repo root — a run from the root triggers `debian/rules clean`, which `rm -rf`s the build dir out from under you.
+- Never resume a killed build: a killed `dpkg-buildpackage` leaves half-applied quilt state (`.pc/` backups) that poisons the next attempt. `rm -rf` the build dir and recreate via `make pve-qemu-kvm-11.1.1`.
+- `dpkg-checkbuilddeps` / `apt-get build-dep .` needs the PVE repo with **`deb-src` + the `pve-no-subscription` component** enabled (Debian 13/trixie sources).
+
+PVE-compatibility checks (now trivial — the base *is* PVE's QEMU):
+1. `dpkg -I` version must read `11.1.1-2+triton1` (base-version legible).
 2. `qemu-system-x86_64 -device virtio-gpu-gl-pci,help` must list `blob`, `hostmem`, `venus`, `neptune` properties.
-3. Machine types: run `qemu-system-x86_64 -machine help | grep q35` and confirm `pc-q35-<PVE version>` exists (Q2).
-4. Dry-run the saved PVE `qm showcmd` output against the fork binary (substitute the binary path, fix `-name`/pidfile paths) until it starts without argument errors.
+3. No dry-run of `qm showcmd` needed — PVE's `-machine type=pc-q35-11.x+pve0`, `-id`, and efidisk0 blockdev JSON are generated for and accepted by this base.
+4. The only delta vs stock is the Triton series: `dpkg -L pve-triton-qemu` should match stock `pve-qemu-kvm` file-for-file (plus conffiles).
 
-Pass: the installed fork boots the stock PVE-generated Windows VM config (with `vga: std`, before the display switch) and is interactive in the same way as packaged QEMU.
+Pass: `pve-triton-qemu_11.1.1-2+triton1_amd64.deb` builds; a stock PVE VM config (native machine type, efidisk0, and all) starts under the installed binary with the Neptune device attached; **EFI boot options survive a VM reset** (the property the fork's strict efidisk size-hint handling destroyed).
 
-## Step 4 — Local APT repo and host install
+## Step 4 — Local APT repo and host install (pivoted: replace, don't coexist)
 
-Goal: make the fork a first-class, dpkg-managed citizen on the PVE host — installable, upgradable, removable — without touching the packaged `pve-qemu-kvm`.
+Goal: make the Triton stack a first-class, dpkg-managed citizen on the PVE host — installable, upgradable, and trivially revertible — with `pve-triton-qemu` **replacing the stock `pve-qemu-kvm`** (same file paths, `Conflicts/Replaces: pve-qemu-kvm`), which retires the old coexistence scheme (separate prefix + `/usr/bin/pve-triton-qemu` wrapper + `/usr/bin/kvm` dispatcher shim).
 
-1. Collect the three .debs from Steps 1–3 into a local APT repo on the PVE host (or LAN host): `aptly` or plain `reprepro` over a small HTTP server; add it as an apt source with the signing key.
-2. Install in dependency order: `apt install pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu pve-triton-stack` (the meta package pulls the other three plus the conffiles).
-3. The packages provide the runtime plumbing — no manual env vars:
-   - `/etc/pve-triton/env` (conffile): `LD_LIBRARY_PATH=/usr/lib/pve-triton/virglrenderer/lib:/usr/lib/pve-triton/dxvk/lib`
-   - `/usr/bin/pve-triton-qemu` (wrapper): sources the env file and `exec`s `/usr/lib/pve-triton/qemu/bin/qemu-system-x86_64 "$@"`
-4. Hold against unattended upgrades: `apt-mark hold pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu`; lift the hold only when a rebuild against new PVE packages has passed the Step 3 dry-run.
-5. Sanity: `dpkg -L pve-triton-qemu` shows no files outside `/usr/lib/pve-triton`, `/usr/bin/pve-triton-qemu`, and `/etc/pve-triton`; run the Step 3 dry-run using the wrapper binary from the host.
+1. Collect the .debs from Steps 1–3 into a local APT repo on the PVE host (or LAN host): `aptly` or plain `reprepro` over a small HTTP server; add it as an apt source with the signing key. For a single test node, `apt install ./pve-triton-*.deb` works instead (all package paths on **one** command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends).
+2. Install in dependency order: `apt install pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu pve-triton-stack`. Installing `pve-triton-qemu` upgrades/replaces `pve-qemu-kvm` in place — same `/usr/bin/kvm`, same machine types, same QMP — so **`qm` lifecycle integration is untouched by construction**.
+3. The dxvk/virglrenderer packages still provide the runtime plumbing via `/etc/pve-triton/env` (conffile): `LD_LIBRARY_PATH` for the render server's DXVK/virgl libraries. The QEMU wrapper is gone; the env file is sourced by the render-server launch path.
+4. Hold against unattended upgrades: `apt-mark hold pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu pve-qemu-kvm`; lift the hold only when a rebuild against a new base has passed the Step 3 checks.
+5. **Revert path (tested mentally, one command):** `apt install --reinstall pve-qemu-kvm=<stock-version>` (or `apt install pve-qemu-kvm` from the PVE repo after lifting the hold) restores stock QEMU byte-for-byte; the Triton VMs then fail at the `neptune` device property until the package is reinstalled — that is the intended loud failure.
+6. Sanity: `dpkg -S /usr/bin/kvm` → `pve-triton-qemu`; `kvm --version` → `11.1.1` base; the Step 3 checks against the installed binary.
 
-Pass: `apt remove pve-triton-*` cleanly reverts the host to stock PVE; the wrapper boots a test VM launched exactly as PVE would.
+Pass: `apt remove pve-triton-qemu && apt install pve-qemu-kvm` cleanly returns the host to stock PVE behavior; VMs without the Neptune device are unaffected either way.
+
+> **DKMS note:** no step in this map produces a kernel module, so there is no DKMS package — see the applicability note in section 0. Add a `pve-triton-dkms` binary package only if the stack ever grows an out-of-tree module.
 
 > **DKMS note:** no step in this map produces a kernel module, so there is no DKMS package — see the applicability note in section 0. Add a `pve-triton-dkms` binary package only if the fork ever grows an out-of-tree module.
 
@@ -183,21 +196,21 @@ Pass: `apt remove pve-triton-*` cleanly reverts the host to stock PVE; the wrapp
 
 Goal: attach the Neptune-capable virtio-gpu device to a Windows VM.
 
-1. Provision the Windows 10/11 x64 VM normally (q35, OVMF, virtio disk/net from the `virtio-win` ISO, guest agent) with the **default display** (`vga: std`) — the guest needs a POST display before drivers exist; `virtio-ramfb-gl` is UTM-only.
+1. Provision the Windows 10/11 x64 VM normally (q35, OVMF, virtio disk/net from the `virtio-win` ISO, guest agent) with the **default display** (`vga: std`) — the guest needs a POST display before drivers exist; `virtio-ramfb-gl` is UTM-only. Since the pivot, provision against the **native machine type** (plain `machine: q35`; PVE resolves the `+pve0` pin itself) and leave `boot: order=` to `qm set` — quote the semicolons: `qm set <vmid> -boot 'order=sata0;sata1;sata2'` (unquoted, the shell splits the command at `;` and only the first device applies).
 2. After the OS and drivers are in place, switch:
    ```
    # /etc/pve/qemu-server/<vmid>.conf
    vga: none
-   args: -device virtio-gpu-gl-pci,hostmem=4G,blob=true,venus=true,neptune=true
+   args: -display egl-headless,gl=on -device virtio-gpu-gl-pci,id=triton0,hostmem=4G,blob=true,venus=true,neptune=true
    ```
-   Start small on `hostmem` (2–4G); it is reserved on top of `-m` (R5 in the risk register).
+   Start small on `hostmem` (2–4G); it is reserved on top of `-m` (R5 in the risk register). `egl-headless,gl=on` is the GL display backend the Neptune device requires (PVE's noVNC then renders from the virtio-gpu console).
 3. Boot and confirm in the guest: a `1AF4:1050` PCI device appears (Device Manager / `pnputil /enum-devices`).
 
 Pass: device enumerated in the guest; VM still boots to desktop on the fallback display path (or headless, pending Step 7).
 
-> **Machine-type gotcha (test node, 2026-10-07):** `qm showcmd 101` on PVE 9.2 resolves even a plain `machine: q35` pin to `-machine 'type=pc-q35-11.0+pve0'` — the stock QEMU 11.0 version plus PVE's machine-type patch. The utmapp fork (base 10.0.12, no PVE patches) accepts neither, so **`qm start` against the fork will fail at machine type** (risk R2 made concrete). Resolution options, in order of preference: pin the VM to `machine: pc-q35-10.0` and pass `args:` so the fork only needs the version-alias (verify the fork maps `pc-q35-10.0` — stock QEMU aliases minor versions), or launch the VM via the fork with a hand-built machine line (loses `qm` lifecycle integration; acceptable for a dedicated test VM). Saved contract: `/root/vm101-showcmd.txt` on the test node.
+> **Machine-type gotcha — OBSOLETE since the pivot (2026-10-08):** this note described pinning `machine: pc-q35-10.0` and lowering `creation-qemu` meta so the *utmapp fork* (base 10.0.12) would start. On the `pve-qemu` base, PVE's resolved machine type (`pc-q35-11.x+pve0`) is native — pin nothing, lower nothing; a plain `machine: q35` is correct.
 
-> **Resolved on the test node — the `/usr/bin/kvm` dispatcher shim (2026-10-07):** `qm start` under the fork works with full PVE lifecycle integration (QMP, pidfile, noVNC) via a `dpkg-divert` shim: the stock binary is preserved as `/usr/bin/kvm.distrib`, and `/usr/bin/kvm` (see `packaging/pve-triton-stack/kvm-dispatcher.sh`) routes only VMIDs listed in `PVE_TRITON_VMS` to the fork, rewriting the PVE-only bits the fork can't accept:
+> **RETIRED — the `/usr/bin/kvm` dispatcher shim (2026-10-07, removed by the Step 3 pivot):** before the pivot, `qm start` under the utmapp fork worked only through a `dpkg-divert` shim (`packaging/pve-triton-stack/kvm-dispatcher.sh`) that routed listed VMIDs to the fork and rewrote eight PVE-only argument groups:
 >
 > | PVE emission | fork gap | shim rewrite |
 > |---|---|---|
@@ -208,8 +221,9 @@ Pass: device enumerated in the guest; VM still boots to desktop on the fallback 
 > | `-vnc …,password=on` | no DES cipher backend | `password=on` removed |
 > | `"aio":"io_uring"` | no liburing in build | `"aio":"threads"` |
 > | *(no `-accel` arg)* | pve-qemu-kvm defaults to KVM when named `kvm`; fork defaults to TCG | append `-accel kvm` |
+> | `"size":131072` in efidisk0 blockdev JSON | fork's pflash backend honors the size hint strictly | strip the size hint |
 >
-> The last three go away once the fork is rebuilt with `liburing-dev`, `libiscsi-dev`, `libgcrypt20-dev` (Build-Depends updated). Note PVE pins a Windows guest's machine version to at least its `creation-qemu` meta value — the test VM's meta was lowered to `creation-qemu=10.0.0` so a `pc-q35-10.0` pin sticks. GL requirement: the Neptune device only realizes on a GL display backend — keep `vga: std` and add `-display egl-headless,gl=on` via `args:` (PVE's noVNC stays on the VGA console; egl-headless serves the virtio-gpu console).
+> The table is kept as the cost accounting that justified the pivot: every row was a per-VM argument rewrite living outside dpkg, and the last row was the nasty one — with the hint left in, the fork truncated OVMF's var store to 128K on load, NVRAM became RAM-only, and **every boot option (bcfg entries, Windows' own Boot Manager entry) silently vanished at reset**, costing hours of "vanishing boot entries / UEFI shell after every reboot" ghost-debugging before the size-hint strip was added as yet another shim row. On the native `pve-qemu` base all eight rows disappear by construction: PVE's efidisk0 handling is PVE's own supported code path, and `qm` emits arguments its own QEMU understands. Lesson retained: **when a shim layer starts rewriting the guest-firmware contract, stop shimming and change the base.**
 
 > **Verified 2026-10-07 (LXC, no KVM):** with `-display egl-headless -S -device virtio-gpu-gl-pci,hostmem=256M,blob=true,venus=true,neptune=true`, the device **realizes successfully** through the built virglrenderer (TCG accel; the smoke test ran until killed). One new host requirement surfaced: QEMU logs `warning: open /dev/udmabuf: No such file or directory` — the fork uses the kernel's `udmabuf` helper (`CONFIG_UDMABUF`). It is non-fatal at device-realize time, but **add to the PVE host checklist: `modprobe udmabuf`** (and make it persistent via `/etc/modules-load.d/`); if QEMU runs inside an LXC, the node must also be passed into the container. Runtime impact (fatal vs fallback path) is still unverified — resolve on the PVE node.
 
@@ -253,5 +267,28 @@ Pass: smooth desktop in the guest console. A *smoothly compositing desktop* (DWM
 ## Where the port could stall, in order
 
 1. **Step 2** — wrong virglrenderer branch (macOS-only backend); resolve Q1 first.
-2. **Step 3** — QEMU fork too old for PVE machine types or missing `neptune` property; resolve Q2/Q3 first.
+2. **Step 3** — a Triton patch regressed against a newer PVE base; re-run the rebase ledger below.
 3. **Step 7** — display scanout needs a QEMU patch; this is the only step where original code is likely to be written.
+
+## Appendix — Triton series provenance (utmapp/qemu `dev/neptune-linux` → `pve-qemu` quilt)
+
+The rebased series lives in `debian/patches/triton/` (13 patches) of the `pve-triton-qemu` source package. The `qemu` submodule stays pristine; all porting knowledge is in the quilt layer. Of the 16 UTM commits the series was cut from, **13 were rebased, 2 were already absorbed by upstream QEMU 11.1.1, and 1 was dropped as macOS-only** (in addition to four earlier UTM UI commits — Metal/ANGLE cleanup `e03f5c90d1`, console rename `3efe3a5992`, native device `f9b62e0ee7`, Metal scanout `123780d896` — which were never selected because their Linux value is zero and their API base is the fork's renamed console layer).
+
+| # | utmapp commit | subject | disposition in `pve-qemu` series |
+|---|---|---|---|
+| 1 | `435e2fc057` | virtio-gpu: Support Neptune context | `triton/0001` — capsets/device property conflicts resolved keeping both upstream and fork paths |
+| 2 | `d8a30b7576` | virtio-gpu: support context init multiple timeline | `triton/0002` — upstream error handling kept; fork's timeline argument to `create_fence` |
+| 3 | `b64cf290f7` | virtio-gpu-virgl: add support for native blob scanout | `triton/0003` — applied clean |
+| 4 | `650063be4a` | virtio-gpu-virgl: Add virtio-gpu-virgl-hostmem-region type | **absorbed** — upstream 11.1.1's `mapping_state` machine supersedes the fork's boolean state |
+| 5 | `c4fc99c8b4` | virtio-gpu: keep suspended fenced commands at the cmdq head | `triton/0004` |
+| 6 | `a6a16d8dde` | virtio-gpu-virgl: tear down hostmem region in resource_destroy | `triton/0005` — folded with the virglrenderer-version-define conflict resolutions |
+| 7 | `410460413d` | virtio-gpu/udmabuf: make flip-chain re-presents cheap | `triton/0006` — renamed to upstream console API (`qemu_console_gl_scanout_dmabuf`), fork's conditional-resize logic kept |
+| 8 | `10cd9e21d8` | virtio-gpu-virgl: bound the scanout-blob rect | **absorbed** — upstream refactored the same check into `virtio_gpu_check_scanout_bounds` |
+| 9 | `a0f453befd` | virtio-gpu: retire fences immediately when the renderer context is dead | `triton/0007` — the guest-GPU-scheduler-wedge fix (VIDEO_TDR_FAILURE class); merged into upstream's logging style |
+| 10 | `881e5ff38f` | virtio-gpu-virgl: bound render-server fence-notify latency to 1ms | `triton/0008` |
+| 11 | `2870e745b9` | virtio-gpu: Support asynchronous fencing | `triton/0009` — committed but **functionally absorbed**: upstream 11.1.1 already carries `async_fenceq`/`reset_async_fences` |
+| 12 | `3824e0d996` | virtio-gpu: enable async fencing on the render-server path without EGL | `triton/0010` — the render-server-critical one; `async_fence_enabled` merged with upstream's hostmem fields |
+| 13 | `3bdba2ae2e` | virtio-gpu: don't stall the control queue behind a blob unmap | `triton/0011` — **re-grafted onto upstream's `mapping_state` machine**: deferred UNREF completion (`cmd->deferred`), BH-drained `unmap_done_list`, immediate UNMAP_BLOB response; also repaired the duplicated `resource_destroy` left by the rebase |
+| 14 | `757606845f` | virtio-gpu: let a create wait for a deferred unref of the same id | `triton/0012` |
+| 15 | `7c3a9a0e52` | virtio-gpu-gl: initialise the deferred flag on every popped command | `triton/0013` |
+| 16 | `263d9536fa` | spice-display: avoid sending duplicate scanout | **dropped** — CONFIG_IOSURFACE/CONFIG_METAL macOS-only paths, no Linux build value |
