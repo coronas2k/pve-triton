@@ -26,7 +26,11 @@ Architecture: amd64
 # PVE launches /usr/bin/kvm directly with no wrapper, so the Neptune-capable
 # library must BE the system libvirglrenderer — hence Conflicts/Replaces of
 # the Debian 1.1.0 packages (same soname; Neptune is a superset).
-Provides: libvirglrenderer1, libvirglrenderer-dev
+# Provides are versioned so that versioned dependencies (including this
+# package's own ${shlibs:Depends} on libvirglrenderer1, emitted because the
+# render server links the soname shipped in the same package) resolve
+# against the virtual package; unversioned Provides cannot satisfy (>= N).
+Provides: libvirglrenderer1 (= ${binary:Version}), libvirglrenderer-dev (= ${binary:Version})
 Conflicts: libvirglrenderer1, libvirglrenderer-dev, virglrenderer
 Replaces: libvirglrenderer1, libvirglrenderer-dev, virglrenderer
 # Optional but required for Intel/AMD hosts: mesa-vulkan-drivers provides
