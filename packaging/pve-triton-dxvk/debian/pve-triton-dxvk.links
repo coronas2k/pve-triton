@@ -1,2 +1,15 @@
+# Plain-name dlopen fallbacks: the render server opens "libd3d11.so"/
+# "libdxgi.so" when NPT_*_LIBRARY_PATH is unset (npt_library_names.h).
 usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libdxvk_d3d11.so usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libd3d11.so
 usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libdxvk_dxgi.so usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/libdxgi.so
+# Expose the pkg-config files in the system search path: the Triton
+# virglrenderer.pc (which replaced Debian's libvirglrenderer-dev) declares
+# "Requires.private: ... dxvk-dxgi", so any consumer of virglrenderer.pc
+# (meson in pve-qemu-kvm) must resolve dxvk-dxgi.pc with a default
+# PKG_CONFIG_PATH. The .pc files carry the absolute private prefix inside,
+# so symlinks suffice.
+usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d8.pc usr/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d8.pc
+usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d9.pc usr/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d9.pc
+usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d10core.pc usr/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d10core.pc
+usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d11.pc usr/lib/x86_64-linux-gnu/pkgconfig/dxvk-d3d11.pc
+usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig/dxvk-dxgi.pc usr/lib/x86_64-linux-gnu/pkgconfig/dxvk-dxgi.pc
