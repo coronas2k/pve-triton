@@ -25,13 +25,25 @@ jobs:
         shell: pwsh
         run: |
           $ProgressPreference = 'SilentlyContinue'
+          Get-PSDrive C | Select-Object Used, Free | Format-List | Out-String | Write-Host
           $iso = 'C:\ewdk24h2.iso'
-          if (-not (Test-Path $iso)) {
-            curl.exe -L -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957'
+          $expected = 19100119040  # EWDK_ge_release_26100 ISO size
+          if (-not (Test-Path $iso) -or (Get-Item $iso).Length -ne $expected) {
+            for ($try = 1; $try -le 4; $try++) {
+              Write-Host "EWDK download attempt $try"
+              curl.exe -L -C - --retry 3 --retry-delay 10 -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957' && break
+              Write-Host "curl exit: $LASTEXITCODE; retrying"
+              Start-Sleep -Seconds 20
+            }
           }
+          $len = (Get-Item $iso).Length
+          Write-Host "ISO size: $len (expected $expected)"
+          if ($len -ne $expected) { throw "EWDK ISO download incomplete: $len bytes" }
           $img = Mount-DiskImage -ImagePath $iso -PassThru
           $vol = $img | Get-Volume
           $drive = "$($vol.DriveLetter):\"
+          Write-Host "Mounted at $drive"
+          Get-ChildItem $drive | Select-Object Name | Out-String | Write-Host
           $launcher = Get-ChildItem "${drive}Program Files" -Filter LaunchBuildEnv.cmd -Recurse |
             Select-Object -First 1 -ExpandProperty FullName
           if (-not $launcher) { throw "LaunchBuildEnv.cmd not found under $drive" }
