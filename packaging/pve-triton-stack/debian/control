@@ -8,11 +8,14 @@ Build-Depends: debhelper-compat (= 13)
 
 Package: pve-triton-stack
 Architecture: all
-Depends: pve-triton-dxvk, pve-triton-virglrenderer, pve-triton-qemu, ${misc:Depends}
+# pve-qemu-kvm carries the Triton quilt series since the 2026-10-08 pivot
+# (pve-triton-qemu, the utmapp-fork coexistence package, is retired).
+Depends: pve-triton-dxvk, pve-triton-virglrenderer, pve-qemu-kvm (>= 11.1.1-2+triton1), ${misc:Depends}
 Description: Triton/Neptune D3D11 stack for Proxmox VE (meta package)
  Meta package tying together the Triton host stack: pve-triton-dxvk
- (host D3D11 renderer), pve-triton-virglrenderer (Neptune render
- server) and pve-triton-qemu (Neptune-capable virtio-gpu). Provides
- /usr/bin/pve-triton-qemu, which wires up LD_LIBRARY_PATH and the
- NPT_*_LIBRARY_PATH host-backend variables from /etc/pve-triton/env
- before exec'ing the forked QEMU. Coexists with pve-qemu-kvm.
+ (host D3D11 renderer), pve-triton-virglrenderer (Neptune render server,
+ system libvirglrenderer replacement) and pve-qemu-kvm carrying the
+ Triton quilt series (Neptune-capable virtio-gpu). Ships only the
+ /etc/pve-triton/env conffile documenting optional NPT_*_LIBRARY_PATH
+ overrides; no wrapper is needed since the pivot (PVE launches
+ /usr/bin/kvm directly and everything resolves system-wide).

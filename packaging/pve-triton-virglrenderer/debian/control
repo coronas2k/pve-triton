@@ -21,17 +21,24 @@ Build-Depends:
 
 Package: pve-triton-virglrenderer
 Architecture: amd64
+# System install (prefix /usr): QEMU (pve-qemu-kvm with the Triton quilt
+# series) links libvirglrenderer.so.1 by soname at build and run time, and
+# PVE launches /usr/bin/kvm directly with no wrapper, so the Neptune-capable
+# library must BE the system libvirglrenderer — hence Conflicts/Replaces of
+# the Debian 1.1.0 packages (same soname; Neptune is a superset).
+Provides: libvirglrenderer1, libvirglrenderer-dev
+Conflicts: libvirglrenderer1, libvirglrenderer-dev, virglrenderer
+Replaces: libvirglrenderer1, libvirglrenderer-dev, virglrenderer
 # Optional but required for Intel/AMD hosts: mesa-vulkan-drivers provides
 # the ANV/RADV ICD the render server's DXVK libraries target (D3D11 ->
 # Vulkan). Kept a Recommends, not a Depends, so an NVIDIA host can satisfy
 # the Vulkan requirement with the proprietary driver's ICD instead.
-# DXVK is dlopen()ed via NPT_D3D11_LIBRARY_PATH, invisible to dh_shlibdeps.
-Depends: ${misc:Depends}, ${shlibs:Depends}, pve-triton-dxvk
+Depends: ${misc:Depends}, ${shlibs:Depends}, pve-triton-dxvk, libvulkan1
 Recommends: mesa-vulkan-drivers
 Description: virglrenderer with Neptune D3D11 render server (Triton stack)
  Fork of utmapp/virglrenderer (dev/neptune-linux branch) built with
  -Dneptune=true -Dvenus=true. Provides the virgl_render_server which
  deserializes Neptune D3D11 API calls from QEMU virtio-gpu and executes
- them on the host via the pve-triton-dxvk libraries. Installed under
- /usr/lib/pve-triton/virglrenderer.
+ them on the host via the pve-triton-dxvk libraries. Installs to the
+ normal /usr paths and takes over libvirglrenderer from Debian.
  Upstream: https://github.com/utmapp/virglrenderer

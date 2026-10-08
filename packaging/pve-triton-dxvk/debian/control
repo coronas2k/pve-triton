@@ -21,5 +21,7 @@ Description: Triton host renderer libraries (DXVK native, headless dmabuf WSI)
  libdxvk_dxgi.so, ...) for the UTM/Neptune Triton D3D11 virtualization
  stack. The headless WSI exports rendered frames as dmabufs for
  scanout through virtio-gpu. Installed under /usr/lib/pve-triton/dxvk
- (private to pve-triton-virglrenderer / pve-triton-qemu).
+ and made dlopen()-resolvable by plain name (libd3d11.so/libdxgi.so)
+ via the shipped /etc/ld.so.conf.d drop-in, so the Neptune render
+ server needs no environment variables.
  Upstream: https://github.com/osy/dxvk

@@ -1,5 +1,8 @@
 #!/usr/bin/make -f
-# pve-triton-stack: meta package + wrapper/env conffiles.
+# pve-triton-stack: meta package + /etc/pve-triton/env conffile.
+# (The /usr/bin/pve-triton-qemu wrapper and /usr/bin/kvm dispatcher shim
+# are retired since the 2026-10-08 pivot: pve-qemu-kvm itself carries the
+# Triton series and everything resolves system-wide.)
 
 %:
 	dh $@

@@ -1,8 +1,13 @@
 #!/usr/bin/make -f
 # pve-triton-virglrenderer: utmapp/virglrenderer dev/neptune-linux with
-# Neptune + Venus enabled. DXVK is a build-time pkg-config dependency
+# Neptune + Venus enabled, installed to the SYSTEM prefix (/usr) so that
+# pve-qemu-kvm's configure picks it up via the default pkg-config path and
+# the running /usr/bin/kvm links the Neptune-capable library without any
+# LD_LIBRARY_PATH plumbing (PVE launches kvm directly; there is no wrapper
+# since the Step 3 pivot). DXVK is a build-time pkg-config dependency
 # (virglrenderer.pc Requires.private: dxvk-dxgi) and a runtime dlopen
-# dependency (NPT_*_LIBRARY_PATH), both provided by pve-triton-dxvk.
+# dependency (plain names via the ld.so.conf.d drop-in shipped by
+# pve-triton-dxvk), both provided by pve-triton-dxvk.
 
 export DEB_BUILD_MAINT_OPTIONS = hardening=+all
 
@@ -10,13 +15,14 @@ export PKG_CONFIG_PATH = /usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig
 
 BUILDDIR = builddir
 MESON_FLAGS = \
-	-Dprefix=/usr/lib/pve-triton/virglrenderer \
+	-Dprefix=/usr \
 	-Dplatforms=egl \
 	-Dneptune=true \
 	-Dvenus=true \
 	-Dtests=false \
 	-Dc_args=-Wno-error=pedantic \
 	-Dcpp_args=-Wno-error=pedantic
+
 # NOTE: -Dplatforms=egl is load-bearing. With 'auto' a missing gbm.pc at
 # configure time silently degrades to a GLX-only build (USELESS headless),
 # and the fork's QEMU then fails every guest GL command with
@@ -39,9 +45,10 @@ override_dh_auto_install:
 override_dh_auto_test:
 	# No useful test suite here (-Dtests=false); validated end-to-end
 	# by QEMU device realize and the guest driver.
+
 export DEB_BUILD_OPTIONS = noautodbgsym nostrip
 
 override_dh_shlibdeps:
-	# Intra-package private lib (virgl_test_server links libvirglrenderer.so.1
-	# from this same package); inter-package Depends are manual in control.
-	dh_shlibdeps -l$(CURDIR)/debian/pve-triton-virglrenderer/usr/lib/pve-triton/virglrenderer/lib/x86_64-linux-gnu --dpkg-shlibdeps-params=--ignore-missing-info
+	# Links libdxvk_*.so from pve-triton-dxvk (private layout, no shlibs
+	# file); Depends declared manually in debian/control.
+	dh_shlibdeps -l/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu --dpkg-shlibdeps-params=--ignore-missing-info

@@ -1,0 +1,5 @@
+# Makes the private DXVK libdir resolvable to dlopen() by name for the
+# Neptune render server (which falls back to plain "libd3d11.so" /
+# "libdxgi.so" when NPT_*_LIBRARY_PATH is unset) — there is no wrapper
+# sourcing /etc/pve-triton/env since the Step 3 pivot.
+/usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu

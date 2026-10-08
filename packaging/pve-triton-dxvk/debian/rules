@@ -30,10 +30,16 @@ override_dh_auto_build:
 
 override_dh_auto_install:
 	DESTDIR=$(CURDIR)/debian/pve-triton-dxvk meson install -C $(BUILDDIR)
+	# ld.so.conf.d drop-in: the render server dlopen()s plain names
+	# (libd3d11.so/libdxgi.so) when NPT_*_LIBRARY_PATH is unset, which is
+	# the normal case (no wrapper since the Step 3 pivot).
+	install -D -m644 debian/ld.so.conf.d-pve-triton-dxvk \
+		debian/pve-triton-dxvk/etc/ld.so.conf.d/pve-triton-dxvk.conf
 
 override_dh_auto_test:
 	# No test suite for the native headless build; smoke-tested
 	# end-to-end by the render server.
+
 export DEB_BUILD_OPTIONS = noautodbgsym nostrip
 
 override_dh_shlibdeps:
