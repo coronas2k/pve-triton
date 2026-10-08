@@ -1,0 +1,95 @@
+name: Build viogpu3d (neptune HEAD, x64)
+
+on:
+  push:
+    branches: ['**']
+    paths: ['.github/workflows/build-viogpu3d.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: windows-2022
+    steps:
+      - name: Clone upstream driver source
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          git clone --filter=blob:none https://github.com/osy/kvm-guest-drivers-windows.git
+          cd kvm-guest-drivers-windows
+          git checkout 3f58ca3  # neptune HEAD at build time
+
+      - name: Download and mount EWDK 24H2
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          $iso = 'C:\ewdk24h2.iso'
+          if (-not (Test-Path $iso)) {
+            curl.exe -L -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957'
+          }
+          $img = Mount-DiskImage -ImagePath $iso -PassThru
+          $vol = $img | Get-Volume
+          $drive = "$($vol.DriveLetter):\"
+          $launcher = Get-ChildItem "${drive}Program Files" -Filter LaunchBuildEnv.cmd -Recurse |
+            Select-Object -First 1 -ExpandProperty FullName
+          if (-not $launcher) { throw "LaunchBuildEnv.cmd not found under $drive" }
+          "EWDK_LAUNCHER=$launcher" >> $env:GITHUB_ENV
+          Write-Host "EWDK launcher: $launcher"
+
+      - name: Stage UMD DLLs from v0.3 release
+        shell: pwsh
+        run: |
+          $ProgressPreference = 'SilentlyContinue'
+          Invoke-WebRequest -Uri 'https://github.com/osy/kvm-guest-drivers-windows/releases/download/v0.3/viogpu3d-x64-signed.zip' -OutFile C:\v03.zip
+          Expand-Archive -Path C:\v03.zip -DestinationPath C:\v03
+          New-Item -ItemType Directory -Force -Path C:\mesa\bin | Out-Null
+          Copy-Item C:\v03\drivers\viogpu3d\neptune_umd.dll C:\mesa\bin\
+          Copy-Item C:\v03\drivers\viogpu3d\vulkan_virtio.dll C:\mesa\bin\
+
+      - name: Create test-signing certificate
+        shell: pwsh
+        working-directory: kvm-guest-drivers-windows
+        run: |
+          $c = New-SelfSignedCertificate -Type CodeSigningCert `
+            -Subject 'CN=VirtIOTestCert-CI' -CertStoreLocation Cert:\CurrentUser\My
+          $p = ConvertTo-SecureString -String 'ci-build' -Force -AsPlainText
+          Export-PfxCertificate -Cert $c -FilePath build\VirtIOTestCert.pfx -Password $p
+          Export-Certificate -Cert $c -FilePath ..\ci-testcert.cer
+
+      - name: Build viogpu3d (Win10 + Win11, x64)
+        shell: cmd
+        working-directory: kvm-guest-drivers-windows
+        run: |
+          call "%EWDK_LAUNCHER%"
+          cd viogpu
+          set VIRTIO_WIN_NO_ARM=1
+          set MESA_PREFIX=C:\mesa
+          call ..\build\build.bat viogpu.sln "Win10" x64 || exit /b 1
+          call ..\build\build.bat viogpu.sln "Win11" x64 || exit /b 1
+
+      - name: Sign packages
+        shell: cmd
+        working-directory: kvm-guest-drivers-windows
+        run: |
+          call "%EWDK_LAUNCHER%"
+          cd /d %GITHUB_WORKSPACE%\kvm-guest-drivers-windows
+          powershell -NoProfile -Command "Get-ChildItem viogpu\Install -Recurse -Include *.cat,*.sys | ForEach-Object { signtool sign /fd SHA256 /f build\VirtIOTestCert.pfx $_.FullName; if ($LASTEXITCODE -ne 0) { exit 1 } }"
+
+      - name: Collect package listing
+        shell: pwsh
+        working-directory: kvm-guest-drivers-windows
+        run: |
+          Get-ChildItem viogpu\Install -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-String | Write-Host
+
+      - name: Publish to release
+        shell: pwsh
+        run: |
+          Compress-Archive -Path kvm-guest-drivers-windows\viogpu\Install -DestinationPath viogpu3d-ci-x64.zip
+          gh release delete ci-latest --yes --cleanup-tag 2>$null
+          gh release create ci-latest ci-testcert.cer viogpu3d-ci-x64.zip `
+            --title "viogpu3d CI build (neptune HEAD)" `
+            --notes "Automated CI build of viogpu3d.sys from neptune HEAD (3f58ca3). Test-signed with VirtIOTestCert-CI. Trust in guest: certutil -addstore Root ci-testcert.cer && certutil -addstore TrustedPublisher ci-testcert.cer"
+        env:
+          GH_TOKEN: ${{ github.token }}
