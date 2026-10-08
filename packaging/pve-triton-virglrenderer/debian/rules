@@ -11,11 +11,17 @@ export PKG_CONFIG_PATH = /usr/lib/pve-triton/dxvk/lib/x86_64-linux-gnu/pkgconfig
 BUILDDIR = builddir
 MESON_FLAGS = \
 	-Dprefix=/usr/lib/pve-triton/virglrenderer \
+	-Dplatforms=egl \
 	-Dneptune=true \
 	-Dvenus=true \
 	-Dtests=false \
 	-Dc_args=-Wno-error=pedantic \
 	-Dcpp_args=-Wno-error=pedantic
+# NOTE: -Dplatforms=egl is load-bearing. With 'auto' a missing gbm.pc at
+# configure time silently degrades to a GLX-only build (USELESS headless),
+# and the fork's QEMU then fails every guest GL command with
+# "virgl could not be initialized" — the guest firmware spins forever
+# (black display, no network). egl makes the configure error loud.
 
 %:
 	dh $@
