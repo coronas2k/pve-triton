@@ -12,9 +12,9 @@ Less code than it sounds. Neptune was **brought up on a Linux host first** (Ubun
 | Guest KMD (`viogpu3d.sys`, `osy/kvm-guest-drivers-windows`) | **None** | none (Windows guest driver) | Same — signed pre-release package. |
 | DXVK fork | **Rebuild** | `pve-triton-dxvk` | Native Linux build with dmabuf WSI; recipe published. No code changes expected. |
 | virglrenderer (`utmapp/virglrenderer`) | **Rebuild + branch pick** | `pve-triton-virglrenderer` (Depends: dxvk) | `-Dneptune=true -Dvenus=true` Linux build; must confirm the correct branch for the Linux/DXVK backend (Q1 in [next-steps.md](next-steps.md)). |
-| QEMU (`proxmox/pve-qemu` + Triton quilt series) | **Rebase** | `pve-triton-qemu` (Conflicts/Replaces: pve-qemu-kvm) | Series rebased onto stock `v11.1.1` (13 of 16 commits kept; see Step 3 rebase ledger); PVE arg compatibility is native by construction. |
+| QEMU (`proxmox/pve-qemu` + Triton quilt series) | **Rebase** | `pve-qemu-kvm` `11.1.1-2+triton1` (replaces stock) | Series rebased onto stock `v11.1.1` (13 of 16 commits kept; see Step 3 rebase ledger); PVE arg compatibility is native by construction. |
 | macOS-only components | **Skip** | — | WebKit/ANGLE/libepoxy, d3dmetal-native, dxmt-native, universal `lipo` render server, HVF `ipa-granule-size` — none apply to a Linux host. |
-| Integration glue | **New** | `pve-triton-stack` (meta) + wrapper/conffiles | Packaging rules, VM config, environment plumbing (LD_LIBRARY_PATH via package-provided env file), console/display validation. This is the genuinely new work. |
+| Integration glue | **New** | `pve-triton-stack` (meta) + conffile | Packaging rules, VM config, optional env overrides (`/etc/pve-triton/env`), console/display validation. This is the genuinely new work. |
 
 ### DKMS applicability (read before assuming it's needed)
 
@@ -25,11 +25,11 @@ Less code than it sounds. Neptune was **brought up on a Linux host first** (Ubun
 ## 1. Packaging strategy
 
 - **Tooling:** `debhelper` + `meson` build-deps (i.e. `dh` with the meson buildsystem); each component is one source package with a matching binary package name from the table above.
-- **Filesystem layout (FHS-clean, dpkg-owned):** binaries in `/usr/lib/pve-triton/{qemu,virglrenderer,dxvk}/`, shared env file in `/etc/pve-triton/env` (exporting `LD_LIBRARY_PATH=/usr/lib/pve-triton/{virglrenderer,dxvk}/lib`), wrapper at `/usr/bin/pve-triton-qemu` (sourcing the env file, then `exec`ing the real binary). No `/opt`, no loose files outside dpkg's database.
+- **Filesystem layout (FHS-clean, dpkg-owned):** `pve-triton-virglrenderer` installs to the **system prefix `/usr`** (taking over `libvirglrenderer.so.1` from Debian — PVE launches `/usr/bin/kvm` directly, so the Neptune-capable library must be the one QEMU finds by default); `pve-triton-dxvk` stays private under `/usr/lib/pve-triton/dxvk/` but ships an `/etc/ld.so.conf.d` drop-in plus plain-name symlinks so the render server's fallback `dlopen("libd3d11.so")` resolves with no environment; the only conffile is `/etc/pve-triton/env` (optional `NPT_*` overrides, all commented out by default). No `/opt`, no wrapper, no loose files outside dpkg's database.
 - **Versioning:** `<upstream-version>+pve<triton-serial>` (e.g. `9.2.0+pve1`), tracking the base QEMU version so compatibility with PVE's machine types is legible from `dpkg -l`.
-- **Coexistence:** **(pivoted 2026-10-08)** `pve-triton-qemu` **replaces** `pve-qemu-kvm` in place (`Conflicts/Replaces:`), because the base *is* PVE's QEMU — the old separate-prefix + wrapper + dispatcher-scheme coexistence created an argument-translation layer whose cost grew to eight rewrites (see the retired shim note in Step 5). The wrapper package still exists for the render-server env plumbing (`/etc/pve-triton/env`), but no longer wraps the QEMU binary.
+- **Coexistence:** **(pivoted 2026-10-08)** the Triton QEMU package keeps PVE's own name (`pve-qemu-kvm`, version `11.1.1-2+triton1`) and **replaces the stock package in place** — the base *is* PVE's QEMU. The old separate-prefix + wrapper + dispatcher-scheme coexistence created an argument-translation layer whose cost grew to eight rewrites (see the retired shim note in Step 5). `pve-triton-virglrenderer` likewise takes over the system `libvirglrenderer` soname from Debian.
 - **Distribution:** build in a Debian container matching the PVE release, publish to a local APT repo (e.g. `reprepro`/`aptly` served on the PVE host or LAN), then `apt install` + `apt-mark hold pve-triton-*` to survive unattended upgrades. This replaces any manual binary-copy or wrapper-shadowing step.
-- **Conffiles:** the wrapper, env file, and example VM config snippet ship as conffiles so local edits survive upgrades.
+- **Conffiles:** the env file (optional-override documentation) and example VM config snippet ship as conffiles so local edits survive upgrades.
 
 ## 1. Build-order dependency graph
 
@@ -38,7 +38,7 @@ flowchart TD
     p0["Step 0: PVE host inventory<br/>QEMU version, iGPU, vulkaninfo"] --> p1
     p1["Step 1: pve-triton-dxvk deb<br/>meson -Dnative_dmabuf=true"] --> p2
     p2["Step 2: pve-triton-virglrenderer deb<br/>meson -Dneptune=true -Dvenus=true"] --> p3
-    p3["Step 3: pve-triton-qemu deb<br/>configure against staged deps"] --> p4
+    p3["Step 3: pve-qemu-kvm 11.1.1-2+triton1 deb<br/>pve-qemu checkout + triton quilt series"] --> p4
     p4["Step 4: local APT repo + install<br/>apt install, apt-mark hold"] --> p5
     p5["Step 5: Configure VM<br/>vga none + args virtio-gpu-gl-pci"] --> p6
     p6["Step 6: Windows guest driver install<br/>pnputil viogpu3d.inf"] --> p7
@@ -106,7 +106,7 @@ dpkg-buildpackage -us -uc
 
 Port-specific differences from the macOS build:
 - **No render-server fusion.** The macOS flow builds an x86_64 slice for D3DMetal and `lipo`s it with an arm64 DXMT slice. On Linux there is one native render server (`virgl_render_server`) linking/finding the DXVK libs.
-- **Environment discovery is `LD_LIBRARY_PATH`, not `DYLD_FALLBACK_LIBRARY_PATH`**: the render server `dlopen`s the DXVK libraries by plain name, so `/usr/lib/pve-triton/dxvk/lib` must be on `LD_LIBRARY_PATH` at runtime (supplied by the package's env file, Step 4).
+- **Environment discovery needs nothing from the caller**: the render server `dlopen`s the DXVK libraries by plain name (`libd3d11.so`/`libdxgi.so`) and falls back to those defaults when `NPT_*_LIBRARY_PATH` is unset — the dxvk package ships `/etc/ld.so.conf.d/pve-triton-dxvk.conf` plus the plain-name symlinks, so the defaults resolve from the ld.so cache with no wrapper or env file (there is no wrapper: PVE launches `/usr/bin/kvm` directly).
 - `-Dneptune=true` selects the Neptune backend over Venus inside the server; keep `-Dvenus=true` so the same server also serves guest Vulkan (the Triton KMD registers the Venus ICD too).
 
 Pass: `pve-triton-virglrenderer_<version>.deb` builds and installs; on the PVE host, with the DXVK libs resolving via `NPT_*_LIBRARY_PATH`, `/usr/lib/pve-triton/virglrenderer/libexec/virgl_render_server` starts.
@@ -117,7 +117,7 @@ Pass: `pve-triton-virglrenderer_<version>.deb` builds and installs; on the PVE h
 
 > **PIVOT (2026-10-08):** the original plan built `utmapp/qemu` (`utm-edition`) and bridged it to PVE with a command-line dispatcher shim. That bridge turned out to be the dominant cost: eight separate rewrites (machine-type pin, `-id`, `-iscsi`, `-cet-*`, `io_uring`, VNC `password=on`, `-accel` append, and — fatally — an efidisk size-hint strip that truncated OVMF var stores and silently discarded every boot option at reset; see the retired shim note in Step 5). The pivot: build **PVE's own QEMU** with the Triton patch series on top, so PVE's command line is the native dialect and the shim disappears entirely.
 
-Goal: `proxmox/pve-qemu` (master = `pve-qemu-kvm 11.1.1-2`) with its `qemu` submodule pinned at stock `v11.1.1`, carrying the Triton series as **quilt patches in `debian/patches/triton/`** — the submodule tree itself stays pristine, exactly like PVE's own `pve/` patch set. Shipped as `pve-triton-qemu`, which **replaces** the stock `pve-qemu-kvm` package rather than coexisting with it (Step 4).
+Goal: `proxmox/pve-qemu` (master = `pve-qemu-kvm 11.1.1-2`) with its `qemu` submodule pinned at stock `v11.1.1`, carrying the Triton series as **quilt patches in `debian/patches/triton/`** — the submodule tree itself stays pristine, exactly like PVE's own `pve/` patch set. The built package keeps PVE's own name and replaces stock in Step 4: **`pve-qemu-kvm_11.1.1-2+triton1_amd64.deb`**.
 
 ```bash
 git clone https://github.com/proxmox/pve-qemu.git $SRC/pve-qemu
@@ -149,28 +149,29 @@ PVE-compatibility checks (now trivial — the base *is* PVE's QEMU):
 1. `dpkg -I` version must read `11.1.1-2+triton1` (base-version legible).
 2. `qemu-system-x86_64 -device virtio-gpu-gl-pci,help` must list `blob`, `hostmem`, `venus`, `neptune` properties.
 3. No dry-run of `qm showcmd` needed — PVE's `-machine type=pc-q35-11.x+pve0`, `-id`, and efidisk0 blockdev JSON are generated for and accepted by this base.
-4. The only delta vs stock is the Triton series: `dpkg -L pve-triton-qemu` should match stock `pve-qemu-kvm` file-for-file (plus conffiles).
+4. The only delta vs stock is the Triton series: `dpkg -L pve-qemu-kvm` should match the stock package file-for-file.
+5. **Configure must report `VirGL support: YES 1.3.0`** — the version proves it linked the *Triton* virglrenderer (Debian trixie's is 1.1.0, which silently builds a Neptune-less QEMU). Build order matters: install `pve-triton-virglrenderer` (system prefix, `+triton2`) *before* this package's configure runs.
 
-Pass: `pve-triton-qemu_11.1.1-2+triton1_amd64.deb` builds; a stock PVE VM config (native machine type, efidisk0, and all) starts under the installed binary with the Neptune device attached; **EFI boot options survive a VM reset** (the property the fork's strict efidisk size-hint handling destroyed).
+Pass: `pve-qemu-kvm_11.1.1-2+triton1_amd64.deb` builds; a stock PVE VM config (native machine type, efidisk0, and all) starts under the installed binary with the Neptune device attached; **EFI boot options survive a VM reset** (the property the fork's strict efidisk size-hint handling destroyed).
 
 ## Step 4 — Local APT repo and host install (pivoted: replace, don't coexist)
 
-Goal: make the Triton stack a first-class, dpkg-managed citizen on the PVE host — installable, upgradable, and trivially revertible — with `pve-triton-qemu` **replacing the stock `pve-qemu-kvm`** (same file paths, `Conflicts/Replaces: pve-qemu-kvm`), which retires the old coexistence scheme (separate prefix + `/usr/bin/pve-triton-qemu` wrapper + `/usr/bin/kvm` dispatcher shim).
+Goal: make the Triton stack a first-class, dpkg-managed citizen on the PVE host — installable, upgradable, and trivially revertible — with the Triton-carrying `pve-qemu-kvm` (`11.1.1-2+triton1`) **replacing the stock package in place**, which retires the old coexistence scheme (separate prefix + `/usr/bin/pve-triton-qemu` wrapper + `/usr/bin/kvm` dispatcher shim).
 
-1. Collect the .debs from Steps 1–3 into a local APT repo on the PVE host (or LAN host): `aptly` or plain `reprepro` over a small HTTP server; add it as an apt source with the signing key. For a single test node, `apt install ./pve-triton-*.deb` works instead (all package paths on **one** command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends).
-2. Install in dependency order: `apt install pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu pve-triton-stack`. Installing `pve-triton-qemu` upgrades/replaces `pve-qemu-kvm` in place — same `/usr/bin/kvm`, same machine types, same QMP — so **`qm` lifecycle integration is untouched by construction**.
-3. The dxvk/virglrenderer packages still provide the runtime plumbing via `/etc/pve-triton/env` (conffile): `LD_LIBRARY_PATH` for the render server's DXVK/virgl libraries. The QEMU wrapper is gone; the env file is sourced by the render-server launch path.
-4. Hold against unattended upgrades: `apt-mark hold pve-triton-dxvk pve-triton-virglrenderer pve-triton-qemu pve-qemu-kvm`; lift the hold only when a rebuild against a new base has passed the Step 3 checks.
-5. **Revert path (tested mentally, one command):** `apt install --reinstall pve-qemu-kvm=<stock-version>` (or `apt install pve-qemu-kvm` from the PVE repo after lifting the hold) restores stock QEMU byte-for-byte; the Triton VMs then fail at the `neptune` device property until the package is reinstalled — that is the intended loud failure.
-6. Sanity: `dpkg -S /usr/bin/kvm` → `pve-triton-qemu`; `kvm --version` → `11.1.1` base; the Step 3 checks against the installed binary.
+1. Collect the .debs from Steps 1–3 into a local APT repo on the PVE host (or LAN host): `aptly` or plain `reprepro` over a small HTTP server; add it as an apt source with the signing key. For a single test node, `apt install ./pve-triton-*.deb ./pve-qemu-kvm_11.1.1-2+triton1_amd64.deb` works instead (all package paths on **one** command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends).
+2. Install in dependency order: `apt install pve-triton-dxvk pve-triton-virglrenderer ./pve-qemu-kvm_11.1.1-2+triton1_amd64.deb pve-triton-stack`. The Triton `pve-qemu-kvm` upgrades the stock one in place — same `/usr/bin/kvm`, same machine types, same QMP — so **`qm` lifecycle integration is untouched by construction**.
+3. No environment plumbing is needed at all (post-pivot design): `pve-triton-virglrenderer` installs the Neptune-capable `libvirglrenderer.so.1` system-wide, and the render server resolves DXVK via the `ld.so.conf.d` drop-in. `/etc/pve-triton/env` ships for optional `NPT_*` overrides only.
+4. Hold against unattended upgrades: `apt-mark hold pve-triton-dxvk pve-triton-virglrenderer pve-qemu-kvm`; lift the hold only when a rebuild against a new base has passed the Step 3 checks.
+5. **Revert path (one command):** `apt install --reinstall pve-qemu-kvm` from the PVE repo (after lifting the hold) restores stock QEMU byte-for-byte; the Triton VMs then fail at the `neptune` device property until the package is reinstalled — that is the intended loud failure.
+6. Sanity: `dpkg -s pve-qemu-kvm` → version `...+triton1`; `kvm --version` → `11.1.1` base; the Step 3 checks against the installed binary.
 
-Pass: `apt remove pve-triton-qemu && apt install pve-qemu-kvm` cleanly returns the host to stock PVE behavior; VMs without the Neptune device are unaffected either way.
+Pass: `apt remove pve-triton-* && apt install --reinstall pve-qemu-kvm` cleanly returns the host to stock PVE behavior; VMs without the Neptune device are unaffected either way.
 
 > **DKMS note:** no step in this map produces a kernel module, so there is no DKMS package — see the applicability note in section 0. Add a `pve-triton-dkms` binary package only if the stack ever grows an out-of-tree module.
 
 > **DKMS note:** no step in this map produces a kernel module, so there is no DKMS package — see the applicability note in section 0. Add a `pve-triton-dkms` binary package only if the fork ever grows an out-of-tree module.
 
-> **Verified 2026-10-07 (Debian 13 LXC build host):** all four packages build and install via `packaging/build-all.sh`:
+> **Verified 2026-10-07 (Debian 13 LXC build host) — HISTORICAL, pre-pivot package set:** all four packages built and installed via `packaging/build-all.sh`:
 >
 > | package | version | size | notes |
 > |---|---|---|---|
@@ -181,7 +182,7 @@ Pass: `apt remove pve-triton-qemu && apt install pve-qemu-kvm` cleanly returns t
 >
 > End-to-end check through the installed wrapper (`/usr/bin/pve-triton-qemu`) realizes the Neptune device (TCG smoke test, same as the Step 5 note below). Two packaging gotchas for rebuilds: build with `DEB_BUILD_OPTIONS=noautodbgsym nostrip`, and make the QEMU `debian/rules` `dh_auto_clean` a no-op (the source-root `Makefile` is a configure bootstrap; `make distclean` fails). On the PVE host, replace step 1's repo tooling with `apt install ./pve-triton-*.deb` if a LAN repo is overkill.
 
-> **Verified 2026-10-07 (PVE 9.2.2 test node, i5-8500T, iGPU PCI-passthrough at 01:00.0):** all four packages installed via `apt install ./pve-triton-*.deb` (all four paths must be passed on one command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends). Post-install checks: stock `pve-qemu-kvm` 11.0.0 binary checksum unchanged, `qm` functional, and the fork realizes the Neptune device through the wrapper with `-accel kvm`. Two host findings:
+> **Verified 2026-10-07 (PVE 9.2.2 test node, i5-8500T, iGPU PCI-passthrough at 01:00.0) — HISTORICAL, pre-pivot package set (the wrapper and coexistence it describes are retired):** all four packages installed via `apt install ./pve-triton-*.deb` (all four paths must be passed on one command line — a lone `./pve-triton-stack.deb` cannot resolve its component Depends). Post-install checks: stock `pve-qemu-kvm` 11.0.0 binary checksum unchanged, `qm` functional, and the fork realizes the Neptune device through the wrapper with `-accel kvm`. Two host findings:
 >
 > 1. `/dev/udmabuf` already exists — `CONFIG_UDMABUF` is built into the PVE 9.x kernel (`7.0.2-6-pve`), so the Step 5 `modprobe udmabuf` checklist item is a no-op there.
 > 2. **The fork dlopens `libEGL.so.1`/`libGL.so.1` at runtime (via epoxy), which `dh_shlibdeps` cannot see** — `pve-triton-qemu` now carries explicit `Depends: libegl1, libepoxy0, libgbm1, libgl1, libopengl0`. If installing an older build by hand: `apt install libegl1 libepoxy0 libgbm1 libgl1 libopengl0` first (the fresh test node also needed `apt update` — Debian/PVE sources present but unpopulated).
@@ -252,7 +253,7 @@ Goal: prove the scanout path from virtio-gpu blob resources to something a human
 
 1. **SPICE**: set `display: spice` + `vga: none` in the VM config; connect with the SPICE client. SPICE has the most mature dmabuf/gl path in QEMU.
 2. **egl-headless + noVNC**: if SPICE fails, add `args: -display egl-headless,...` (keeping PVE's VNC) so QEMU's VNC backend gets a GL surface for blob scanout.
-3. **Fallback**: if neither renders, the QEMU VNC/SPICE backends need a small patch to surface blob scanout — that becomes the first real code change of the port (scope it then; ship it as a commit in the fork's packaging tree, released in the next `pve-triton-qemu` package bump).
+3. **Fallback**: if neither renders, the QEMU VNC/SPICE backends need a small patch to surface blob scanout — that becomes the first real code change of the port (scope it then; ship it as a commit in the `pve-qemu` checkout's `triton-picks` branch, released in the next `+triton` package bump).
 
 Pass: smooth desktop in the guest console. A *smoothly compositing desktop* (DWM) is itself evidence the shared-texture/fence paths work, since DWM renders every frame through the Neptune stack.
 
@@ -272,7 +273,7 @@ Pass: smooth desktop in the guest console. A *smoothly compositing desktop* (DWM
 
 ## Appendix — Triton series provenance (utmapp/qemu `dev/neptune-linux` → `pve-qemu` quilt)
 
-The rebased series lives in `debian/patches/triton/` (13 patches) of the `pve-triton-qemu` source package. The `qemu` submodule stays pristine; all porting knowledge is in the quilt layer. Of the 16 UTM commits the series was cut from, **13 were rebased, 2 were already absorbed by upstream QEMU 11.1.1, and 1 was dropped as macOS-only** (in addition to four earlier UTM UI commits — Metal/ANGLE cleanup `e03f5c90d1`, console rename `3efe3a5992`, native device `f9b62e0ee7`, Metal scanout `123780d896` — which were never selected because their Linux value is zero and their API base is the fork's renamed console layer).
+The rebased series lives in `debian/patches/triton/` (13 patches) of the `pve-qemu` source package; the built package keeps PVE's name (`pve-qemu-kvm`, `11.1.1-2+triton1`). The `qemu` submodule stays pristine; all porting knowledge is in the quilt layer. Of the 16 UTM commits the series was cut from, **13 were rebased, 2 were already absorbed by upstream QEMU 11.1.1, and 1 was dropped as macOS-only** (in addition to four earlier UTM UI commits — Metal/ANGLE cleanup `e03f5c90d1`, console rename `3efe3a5992`, native device `f9b62e0ee7`, Metal scanout `123780d896` — which were never selected because their Linux value is zero and their API base is the fork's renamed console layer).
 
 | # | utmapp commit | subject | disposition in `pve-qemu` series |
 |---|---|---|---|
