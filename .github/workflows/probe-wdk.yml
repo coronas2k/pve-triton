@@ -7,22 +7,21 @@ on:
 
 jobs:
   probe:
-    strategy:
-      fail-fast: false
-      matrix:
-        runs-on: [windows-2025-vs2026, windows-2025, windows-2022]
-    runs-on: ${{ matrix.runs-on }}
+    runs-on: windows-2025-vs2026
     steps:
-      - name: Report WDK / SDK presence
+      - name: Report WDK include tree
         shell: pwsh
         run: |
-          Write-Host "=== image: ${{ matrix.runs-on }} ==="
-          if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\bin') {
-            Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' | Select-Object Name | Out-String | Write-Host
-          } else {
-            Write-Host "NO Windows Kits\10\bin"
-          }
-          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath 2>$null
-          Write-Host "VS: $vs"
-          if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\Vsix') { Write-Host "WDK VSIX present" }
-          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\lib' -ErrorAction SilentlyContinue | Select-Object Name | Out-String | Write-Host
+          Write-Host "=== Include ==="
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -ErrorAction SilentlyContinue | Select-Object Name | Out-String | Write-Host
+          Write-Host "=== Include\10.0.26100.0 ==="
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0' -ErrorAction SilentlyContinue | Select-Object Name | Out-String | Write-Host
+          Write-Host "=== km ntddk ==="
+          Test-Path 'C:\Program Files (x86)\Windows Kits\10\Include\10.0.26100.0\km\ntddk.h'
+          Write-Host "=== um ntddk ==="
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\Include' -Recurse -Filter ntddk.h -ErrorAction SilentlyContinue | Select-Object FullName | Out-String | Write-Host
+          Write-Host "=== WDK VSIX / integration ==="
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10' -ErrorAction SilentlyContinue | Select-Object Name | Out-String | Write-Host
+          & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property catalog_productLineVersion
+          Write-Host "=== msbuild WDK props search ==="
+          Get-ChildItem 'C:\Program Files\Microsoft Visual Studio\18' -Recurse -Filter 'WindowsDriver*.props' -ErrorAction SilentlyContinue | Select-Object -First 5 FullName | Out-String | Write-Host
