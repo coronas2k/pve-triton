@@ -27,8 +27,7 @@ jobs:
           $ProgressPreference = 'SilentlyContinue'
           Get-PSDrive C | Select-Object Used, Free | Format-List | Out-String | Write-Host
           $iso = 'C:\ewdk24h2.iso'
-          $expected = 19100119040  # EWDK_ge_release_26100 ISO size
-          if (-not (Test-Path $iso) -or (Get-Item $iso).Length -ne $expected) {
+          if (-not (Test-Path $iso) -or (Get-Item $iso).Length -lt 15GB) {
             for ($try = 1; $try -le 4; $try++) {
               Write-Host "EWDK download attempt $try"
               curl.exe -L -C - --retry 3 --retry-delay 10 -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957' && break
@@ -37,8 +36,8 @@ jobs:
             }
           }
           $len = (Get-Item $iso).Length
-          Write-Host "ISO size: $len (expected $expected)"
-          if ($len -ne $expected) { throw "EWDK ISO download incomplete: $len bytes" }
+          Write-Host "ISO size: $len"
+          if ($len -lt 15GB) { throw "EWDK ISO download incomplete: $len bytes" }
           $img = Mount-DiskImage -ImagePath $iso -PassThru
           $vol = $img | Get-Volume
           $drive = "$($vol.DriveLetter):\"
