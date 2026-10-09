@@ -99,7 +99,7 @@ jobs:
           # PS 5.1 + $ErrorActionPreference=stop turns any redirected native stderr
           # into a terminating error, so do the best-effort delete via cmd instead
           cmd /c "gh release delete ci-latest --yes --cleanup-tag -R coronas2k/pve-triton 2>nul & exit /b 0"
-          gh release create ci-latest -R coronas2k/pve-triton ci-testcert.cer viogpu3d-ci-x64.zip `
+          gh release create ci-latest -R coronas2k/pve-triton src\ci-testcert.cer viogpu3d-ci-x64.zip `
             --title "viogpu3d CI build (neptune HEAD)" `
             --notes "Automated CI build of viogpu3d.sys from neptune HEAD (3f58ca3). Test-signed with VirtIOTestCert-CI. Trust in guest: certutil -addstore Root ci-testcert.cer && certutil -addstore TrustedPublisher ci-testcert.cer"
           if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
