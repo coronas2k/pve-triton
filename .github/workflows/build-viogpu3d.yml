@@ -44,8 +44,12 @@ jobs:
           $drive = "$($vol.DriveLetter):\"
           Write-Host "Mounted at $drive"
           Get-ChildItem $drive | Select-Object Name | Out-String | Write-Host
-          $launcher = Get-ChildItem "${drive}Program Files" -Filter LaunchBuildEnv.cmd -Recurse |
-            Select-Object -First 1 -ExpandProperty FullName
+          # EWDK 24H2 has LaunchBuildEnv.cmd at the ISO root; some builds nest it.
+          $launcher = "${drive}LaunchBuildEnv.cmd"
+          if (-not (Test-Path $launcher)) {
+            $launcher = Get-ChildItem $drive -Filter LaunchBuildEnv.cmd -Recurse |
+              Select-Object -First 1 -ExpandProperty FullName
+          }
           if (-not $launcher) { throw "LaunchBuildEnv.cmd not found under $drive" }
           "EWDK_LAUNCHER=$launcher" >> $env:GITHUB_ENV
           Write-Host "EWDK launcher: $launcher"
