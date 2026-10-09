@@ -13,7 +13,8 @@ CONF_FLAGS = \
 	--disable-werror \
 	--disable-docs \
 	--enable-plugins \
-	--target-list=x86_64-softmmu
+	--target-list=x86_64-softmmu \
+	--disable-spice
 
 %:
 	dh $@
