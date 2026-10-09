@@ -22,11 +22,24 @@ jobs:
           cd kvm-guest-drivers-windows
           git checkout 3f58ca3  # neptune HEAD at build time
 
-      - name: Verify WDK presence
+      - name: Install WDK (kernel-mode headers, libs, tools)
         shell: pwsh
         run: |
-          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' | Select-Object Name | Out-String | Write-Host
-          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\lib' | Select-Object Name | Out-String | Write-Host
+          $ProgressPreference = 'SilentlyContinue'
+          $kits = 'C:\Program Files (x86)\Windows Kits\10'
+          if (-not (Test-Path "$kits\Include\10.0.26100.0\km\ntddk.h")) {
+            Invoke-WebRequest -Uri 'https://go.microsoft.com/fwlink/?linkid=2324617' -OutFile C:\wdksetup.exe
+            $p = Start-Process -FilePath C:\wdksetup.exe -ArgumentList '/q','/norestart' -Wait -PassThru
+            Write-Host "wdksetup exit code: $($p.ExitCode)"
+          }
+          $ver = Get-ChildItem "$kits\Include" -Directory |
+            Where-Object { Test-Path "$($_.FullName)\km\ntddk.h" } |
+            Sort-Object Name -Descending | Select-Object -First 1
+          if (-not $ver) { throw 'WDK km headers not found after install' }
+          Write-Host "WDK version folder: $($ver.Name)"
+          "WINSDK_VER=$($ver.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          $lib = Get-ChildItem "$kits\Lib\$($ver.Name)\km\x64" -Filter ntoskrnl.lib
+          if (-not $lib) { throw 'WDK kernel libs not found after install' }
 
       - name: Stage UMD DLLs from v0.3 release
         shell: pwsh
@@ -53,8 +66,15 @@ jobs:
         working-directory: kvm-guest-drivers-windows
         run: |
           call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
-          rem Make build\SetVsEnv.bat treat this like an already-ready env
-          set EnterpriseWDK=1
+          rem WDK 26100 replaces the EWDK: provide the DDK-build env vars that
+          rem the driver projects reference ($(DDK_INC_PATH), $(DDK_LIB_PATH), ...)
+          set KITS=C:\Program Files (x86)\Windows Kits\10
+          set DDK_INC_PATH=%KITS%\Include\%WINSDK_VER%\km\
+          set SDK_INC_PATH=%KITS%\Include\%WINSDK_VER%\shared\
+          set DDK_LIB_PATH=%KITS%\Lib\%WINSDK_VER%\km\x64\
+          set SDK_LIB_PATH=%KITS%\Lib\%WINSDK_VER%\um\x64\
+          set KernelBufferOverflowLib=%DDK_LIB_PATH%BufferOverflowFastFailK.lib
+          set PATH=%KITS%\bin\%WINSDK_VER%\x64;%PATH%
           set VIRTIO_WIN_NO_ARM=1
           set MESA_PREFIX=C:\mesa
           cd viogpu
