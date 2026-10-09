@@ -17,7 +17,9 @@ jobs:
       - name: Fetch upstream driver source
         shell: cmd
         run: |
-          rmdir /s /q %RUNNER_TEMP%\drv %RUNNER_TEMP%\v03 2>nul & exit /b 0
+          if exist %RUNNER_TEMP%\src rmdir /s /q %RUNNER_TEMP%\src
+          if exist %RUNNER_TEMP%\v03 rmdir /s /q %RUNNER_TEMP%\v03
+          if exist %RUNNER_TEMP%\mesa rmdir /s /q %RUNNER_TEMP%\mesa
           curl.exe -sL -o %RUNNER_TEMP%\drv.zip https://codeload.github.com/osy/kvm-guest-drivers-windows/zip/3f58ca3
           curl.exe -sL -o %RUNNER_TEMP%\v03.zip https://github.com/osy/kvm-guest-drivers-windows/releases/download/v0.3/viogpu3d-x64-signed.zip
           powershell -NoProfile -Command "Expand-Archive %RUNNER_TEMP%\drv.zip -DestinationPath %RUNNER_TEMP%\src -Force; Expand-Archive %RUNNER_TEMP%\v03.zip -DestinationPath %RUNNER_TEMP%\v03 -Force"
@@ -46,8 +48,8 @@ jobs:
           MESA_PREFIX: ${{ runner.temp }}\mesa
           VIRTIO_WIN_NO_ARM: 1
         run: |
-          mkdir %RUNNER_TEMP%\mesa\bin 2>nul & exit /b 0
-          mkdir %RUNNER_TEMP%\mesa\share\vulkan\icd.d 2>nul & exit /b 0
+          if not exist %RUNNER_TEMP%\mesa\bin mkdir %RUNNER_TEMP%\mesa\bin
+          if not exist %RUNNER_TEMP%\mesa\share\vulkan\icd.d mkdir %RUNNER_TEMP%\mesa\share\vulkan\icd.d
           copy /y %RUNNER_TEMP%\v03\drivers\viogpu3d\neptune_umd.dll %RUNNER_TEMP%\mesa\bin\
           copy /y %RUNNER_TEMP%\v03\drivers\viogpu3d\vulkan_virtio.dll %RUNNER_TEMP%\mesa\bin\
           copy /y %RUNNER_TEMP%\v03\drivers\viogpu3d\vulkan_virtio.dll %RUNNER_TEMP%\mesa\share\vulkan\icd.d\
