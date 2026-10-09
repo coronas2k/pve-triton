@@ -11,7 +11,8 @@ permissions:
 
 jobs:
   build:
-    runs-on: windows-2022
+    # WDK 10.0.26100 (bin+lib) and VS2026 Enterprise are preinstalled on this image
+    runs-on: windows-2025-vs2026
     steps:
       - name: Clone upstream driver source
         shell: pwsh
@@ -21,38 +22,11 @@ jobs:
           cd kvm-guest-drivers-windows
           git checkout 3f58ca3  # neptune HEAD at build time
 
-      - name: Download and mount EWDK 24H2
+      - name: Verify WDK presence
         shell: pwsh
         run: |
-          $ProgressPreference = 'SilentlyContinue'
-          Get-PSDrive C | Select-Object Used, Free | Format-List | Out-String | Write-Host
-          $iso = 'C:\ewdk24h2.iso'
-          if (-not (Test-Path $iso) -or (Get-Item $iso).Length -lt 15GB) {
-            for ($try = 1; $try -le 4; $try++) {
-              Write-Host "EWDK download attempt $try"
-              curl.exe -L -C - --retry 3 --retry-delay 10 -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957'
-              if ($LASTEXITCODE -eq 0) { break }
-              Write-Host "curl exit: $LASTEXITCODE; retrying"
-              Start-Sleep -Seconds 20
-            }
-          }
-          $len = (Get-Item $iso).Length
-          Write-Host "ISO size: $len"
-          if ($len -lt 15GB) { throw "EWDK ISO download incomplete: $len bytes" }
-          $img = Mount-DiskImage -ImagePath $iso -PassThru
-          $vol = $img | Get-Volume
-          $drive = "$($vol.DriveLetter):\"
-          Write-Host "Mounted at $drive"
-          Get-ChildItem $drive | Select-Object Name | Out-String | Write-Host
-          # EWDK 24H2 has LaunchBuildEnv.cmd at the ISO root; some builds nest it.
-          $launcher = "${drive}LaunchBuildEnv.cmd"
-          if (-not (Test-Path $launcher)) {
-            $launcher = Get-ChildItem $drive -Filter LaunchBuildEnv.cmd -Recurse |
-              Select-Object -First 1 -ExpandProperty FullName
-          }
-          if (-not $launcher) { throw "LaunchBuildEnv.cmd not found under $drive" }
-          "EWDK_LAUNCHER=$launcher" >> $env:GITHUB_ENV
-          Write-Host "EWDK launcher: $launcher"
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' | Select-Object Name | Out-String | Write-Host
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\lib' | Select-Object Name | Out-String | Write-Host
 
       - name: Stage UMD DLLs from v0.3 release
         shell: pwsh
@@ -78,20 +52,27 @@ jobs:
         shell: cmd
         working-directory: kvm-guest-drivers-windows
         run: |
-          call "%EWDK_LAUNCHER%"
-          cd viogpu
+          call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
+          rem Make build\SetVsEnv.bat treat this like an already-ready env
+          set EnterpriseWDK=1
           set VIRTIO_WIN_NO_ARM=1
           set MESA_PREFIX=C:\mesa
+          cd viogpu
           call ..\build\build.bat viogpu.sln "Win10" x64 || exit /b 1
           call ..\build\build.bat viogpu.sln "Win11" x64 || exit /b 1
 
       - name: Sign packages
-        shell: cmd
+        shell: pwsh
         working-directory: kvm-guest-drivers-windows
         run: |
-          call "%EWDK_LAUNCHER%"
-          cd /d %GITHUB_WORKSPACE%\kvm-guest-drivers-windows
-          powershell -NoProfile -Command "Get-ChildItem viogpu\Install -Recurse -Include *.cat,*.sys | ForEach-Object { signtool sign /fd SHA256 /f build\VirtIOTestCert.pfx $_.FullName; if ($LASTEXITCODE -ne 0) { exit 1 } }"
+          $signtool = Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' -Recurse -Filter signtool.exe |
+            Where-Object FullName -match 'x64' | Select-Object -First 1 -ExpandProperty FullName
+          if (-not $signtool) { throw 'signtool.exe not found in WDK bin' }
+          Write-Host "signtool: $signtool"
+          Get-ChildItem viogpu\Install -Recurse -Include *.cat,*.sys | ForEach-Object {
+            & $signtool sign /fd SHA256 /f build\VirtIOTestCert.pfx $_.FullName
+            if ($LASTEXITCODE -ne 0) { exit 1 }
+          }
 
       - name: Collect package listing
         shell: pwsh
