@@ -11,9 +11,8 @@ permissions:
 
 jobs:
   build:
-    # WDK 26100's msbuild task DLLs are versioned for VS2019/VS2022 (16.0/17.0),
-    # so we need VS2022 (msbuild 17), not the VS2026 image
-    runs-on: windows-2025
+    # windows-2025 label now resolves to the VS2026 image, so pin it explicitly
+    runs-on: windows-2025-vs2026
     steps:
       - name: Clone upstream driver source
         shell: pwsh
@@ -41,6 +40,17 @@ jobs:
           "WINSDK_VER=$($ver.Name)" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           $lib = Get-ChildItem "$kits\Lib\$($ver.Name)\km\x64" -Filter ntoskrnl.lib
           if (-not $lib) { throw 'WDK kernel libs not found after install' }
+          # WDK 26100 ships msbuild task DLLs for VS2019/VS2022 only; VS2026 is
+          # msbuild 18 and the WDK targets ask for the 18.0-named assembly, so
+          # alias the newest shipped task DLL to 18.0
+          $bin = "$kits\build\$($ver.Name)\bin"
+          if (-not (Test-Path "$bin\Microsoft.DriverKit.Build.Tasks.18.0.dll")) {
+            $src = Get-ChildItem "$bin\Microsoft.DriverKit.Build.Tasks.*.dll" |
+              Sort-Object Name -Descending | Select-Object -First 1
+            if (-not $src) { throw 'No DriverKit task DLL found' }
+            Copy-Item $src.FullName "$bin\Microsoft.DriverKit.Build.Tasks.18.0.dll"
+            Write-Host "Aliased $($src.Name) -> Microsoft.DriverKit.Build.Tasks.18.0.dll"
+          }
 
       - name: Stage UMD DLLs from v0.3 release
         shell: pwsh
@@ -66,7 +76,7 @@ jobs:
         shell: cmd
         working-directory: kvm-guest-drivers-windows
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
+          call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
           rem WDK 26100 replaces the EWDK: provide the DDK-build env vars that
           rem the driver projects reference ($(DDK_INC_PATH), $(DDK_LIB_PATH), ...)
           set KITS=C:\Program Files (x86)\Windows Kits\10
