@@ -30,7 +30,8 @@ jobs:
           if (-not (Test-Path $iso) -or (Get-Item $iso).Length -lt 15GB) {
             for ($try = 1; $try -le 4; $try++) {
               Write-Host "EWDK download attempt $try"
-              curl.exe -L -C - --retry 3 --retry-delay 10 -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957' && break
+              curl.exe -L -C - --retry 3 --retry-delay 10 -o $iso 'https://go.microsoft.com/fwlink/?linkid=2271957'
+              if ($LASTEXITCODE -eq 0) { break }
               Write-Host "curl exit: $LASTEXITCODE; retrying"
               Start-Sleep -Seconds 20
             }
