@@ -1,0 +1,28 @@
+name: Probe WDK availability
+
+on:
+  push:
+    paths: ['.github/workflows/probe-wdk.yml']
+  workflow_dispatch:
+
+jobs:
+  probe:
+    strategy:
+      fail-fast: false
+      matrix:
+        runs-on: [windows-2025-vs2026, windows-2025, windows-2022]
+    runs-on: ${{ matrix.runs-on }}
+    steps:
+      - name: Report WDK / SDK presence
+        shell: pwsh
+        run: |
+          Write-Host "=== image: ${{ matrix.runs-on }} ==="
+          if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\bin') {
+            Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\bin' | Select-Object Name | Out-String | Write-Host
+          } else {
+            Write-Host "NO Windows Kits\10\bin"
+          }
+          $vs = & "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe" -latest -property installationPath 2>$null
+          Write-Host "VS: $vs"
+          if (Test-Path 'C:\Program Files (x86)\Windows Kits\10\Vsix') { Write-Host "WDK VSIX present" }
+          Get-ChildItem 'C:\Program Files (x86)\Windows Kits\10\lib' -ErrorAction SilentlyContinue | Select-Object Name | Out-String | Write-Host
