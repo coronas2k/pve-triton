@@ -23,14 +23,19 @@ jobs:
           powershell -NoProfile -Command "Expand-Archive %RUNNER_TEMP%\drv.zip -DestinationPath %RUNNER_TEMP%\src -Force; Expand-Archive %RUNNER_TEMP%\v03.zip -DestinationPath %RUNNER_TEMP%\v03 -Force"
           ren %RUNNER_TEMP%\src\kvm-guest-drivers-windows-3f58ca3 drv
 
-      - name: Mount EWDK ISO
+      - name: Detect EWDK drive
         shell: powershell
         run: |
-          $iso = 'C:\Users\nayef\ewdk24h2.iso'
-          $img = Get-DiskImage -ImagePath $iso
-          if (-not $img.Attached) { $img = Mount-DiskImage -ImagePath $iso -PassThru }
-          $letter = ($img | Get-Volume).DriveLetter
-          Write-Host "EWDK mounted at ${letter}:\"
+          # ISO is kept mounted on this VM; find the drive without touching
+          # DiskImage WMI (runner service is NETWORK SERVICE, no admin)
+          $letter = 68..90 | ForEach-Object { [char]$_ } | Where-Object {
+            Test-Path "$($_):\BuildEnv\SetupBuildEnv.cmd"
+          } | Select-Object -First 1
+          if (-not $letter) {
+            $img = Mount-DiskImage -ImagePath 'C:\Users\nayef\ewdk24h2.iso' -PassThru -ErrorAction Stop
+            $letter = ($img | Get-Volume).DriveLetter
+          }
+          Write-Host "EWDK at ${letter}:\"
           "EWDK_DRIVE=${letter}:\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Build viogpu3d (Win10 + Win11, x64)
