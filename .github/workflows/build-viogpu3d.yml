@@ -11,8 +11,9 @@ permissions:
 
 jobs:
   build:
-    # WDK 10.0.26100 (bin+lib) and VS2026 Enterprise are preinstalled on this image
-    runs-on: windows-2025-vs2026
+    # WDK 26100's msbuild task DLLs are versioned for VS2019/VS2022 (16.0/17.0),
+    # so we need VS2022 (msbuild 17), not the VS2026 image
+    runs-on: windows-2025
     steps:
       - name: Clone upstream driver source
         shell: pwsh
@@ -65,7 +66,7 @@ jobs:
         shell: cmd
         working-directory: kvm-guest-drivers-windows
         run: |
-          call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
+          call "C:\Program Files\Microsoft Visual Studio\2022\Enterprise\Common7\Tools\VsDevCmd.bat" -arch=amd64 -no_logo
           rem WDK 26100 replaces the EWDK: provide the DDK-build env vars that
           rem the driver projects reference ($(DDK_INC_PATH), $(DDK_LIB_PATH), ...)
           set KITS=C:\Program Files (x86)\Windows Kits\10
