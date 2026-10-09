@@ -96,8 +96,8 @@ jobs:
         run: |
           $env:PATH = "C:\tools\bin;$env:PATH"  # gh.exe staged on the VM
           Compress-Archive -Path src\drv\viogpu\Install -DestinationPath viogpu3d-ci-x64.zip
-          gh release delete ci-latest --yes --cleanup-tag 2>$null
-          gh release create ci-latest ci-testcert.cer viogpu3d-ci-x64.zip `
+          gh release delete ci-latest --yes --cleanup-tag -R coronas2k/pve-triton 2>$null
+          gh release create ci-latest -R coronas2k/pve-triton ci-testcert.cer viogpu3d-ci-x64.zip `
             --title "viogpu3d CI build (neptune HEAD)" `
             --notes "Automated CI build of viogpu3d.sys from neptune HEAD (3f58ca3). Test-signed with VirtIOTestCert-CI. Trust in guest: certutil -addstore Root ci-testcert.cer && certutil -addstore TrustedPublisher ci-testcert.cer"
         env:
