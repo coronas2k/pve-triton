@@ -80,7 +80,7 @@ jobs:
           if (-not $signtool) { throw 'signtool.exe not found' }
           Write-Host "signtool: $signtool"
           Get-ChildItem viogpu\Install -Recurse -Include *.cat,*.sys | ForEach-Object {
-            & $signtool sign /fd SHA256 /f build\VirtIOTestCert.pfx $_.FullName
+            & $signtool sign /fd SHA256 /f build\VirtIOTestCert.pfx /p ci-build $_.FullName
             if ($LASTEXITCODE -ne 0) { exit 1 }
           }
 
