@@ -24,7 +24,7 @@ jobs:
           ren %RUNNER_TEMP%\src\kvm-guest-drivers-windows-3f58ca3 drv
 
       - name: Mount EWDK ISO
-        shell: pwsh
+        shell: powershell
         run: |
           $iso = 'C:\Users\nayef\ewdk24h2.iso'
           $img = Get-DiskImage -ImagePath $iso
@@ -54,7 +54,7 @@ jobs:
           if not exist Install\Win11\amd64\viogpu3d.sys exit /b 1
 
       - name: Create test-signing certificate
-        shell: pwsh
+        shell: powershell
         working-directory: ${{ runner.temp }}/src/drv
         run: |
           $c = New-SelfSignedCertificate -Type CodeSigningCert `
@@ -64,7 +64,7 @@ jobs:
           Export-Certificate -Cert $c -FilePath ..\ci-testcert.cer
 
       - name: Sign packages
-        shell: pwsh
+        shell: powershell
         working-directory: ${{ runner.temp }}/src/drv
         run: |
           $signtool = @("$env:EWDK_DRIVE\Program Files\Windows Kits\10\bin", 'C:\Program Files (x86)\Windows Kits\10\bin') | ForEach-Object {
@@ -78,13 +78,13 @@ jobs:
           }
 
       - name: Collect package listing
-        shell: pwsh
+        shell: powershell
         working-directory: ${{ runner.temp }}/src/drv
         run: |
           Get-ChildItem viogpu\Install -Recurse | Select-Object FullName, Length | Format-Table -AutoSize | Out-String | Write-Host
 
       - name: Publish to release
-        shell: pwsh
+        shell: powershell
         working-directory: ${{ runner.temp }}
         run: |
           $env:PATH = "C:\tools\bin;$env:PATH"  # gh.exe staged on the VM
